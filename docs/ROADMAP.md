@@ -117,9 +117,23 @@ and useless for ball tracking:
   buttons, per-metric status and reason, and the VFR warning retained
 - 107 tests covering the above
 
+### ✅ Second vertical slice (delivered)
+
+- **All seven phases detected** from the hand path: address, takeaway, top of
+  backswing, downswing, impact region, follow-through, finish
+- Impact reported as a **region**, never a frame — the clubhead is not tracked
+  and at 30 fps it crosses the ball in under one frame interval; the region
+  half-width scales with frame rate
+- Range phases render as ranges in the UI, with the impact caveat inline
+- Dependency-ordered detection: a missing phase blocks its dependents with a
+  reason naming what was absent, reported as `insufficient_frames` rather than
+  `detection_failed` so a cascade stays distinguishable from a real failure
+- Detector version 1 → 2, which invalidates stored analyses without re-running
+  MediaPipe
+- 412 tests
+
 ### ⬜ Remaining in Milestone 3
 
-- Takeaway, downswing, impact region, follow-through, finish detection
 - Manual phase correction that outranks the automatic suggestion
 - Implement the declared-but-not-yet-computed metrics (lead-arm angle,
   hip line, hip depth, posture change, shoulder line)

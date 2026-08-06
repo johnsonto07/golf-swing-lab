@@ -76,12 +76,30 @@ If you need trustworthy tempo today, record in a mode that produces constant
 frame rate, and check `Variable frame rate: no` in the Video Lab's Original
 file panel.
 
-## Swing phases and metrics (Milestone 3, first slice)
+## Swing phases and metrics (Milestone 3)
 
-Only **address** and **top of backswing** are detected. Both come from the hand
-path, which is the one signal a single camera reads reliably from either angle.
-The other phases are not attempted, and the UI says "not attempted by this
-detector" rather than leaving a gap you might read as a failure.
+All seven phases are detected — address, takeaway, top of backswing, downswing,
+impact region, follow-through, finish — all from the hand path, which is the one
+signal a single camera reads reliably from either angle.
+
+**Impact is a region, not a frame, and this will not change.** The clubhead is
+not tracked, so the hands only show roughly when the club came back through the
+ball, and at 30 fps the clubhead crosses the ball in well under one frame
+interval. A single "impact frame" would be a precision this input cannot
+support. The region narrows in real time at higher frame rates, but it stays a
+region.
+
+**Known limitation: a backswing-only clip finds no top.** The top is located as
+the highest hands *between address and peak hand speed* — that bound is what
+stops the finish, where the hands are usually just as high, from being mistaken
+for the top. On a clip that ends at the top, peak speed falls inside the
+backswing and the bound collapses. The detector reports no top and blocks the
+dependent phases rather than guessing. Record through the finish.
+
+**Range phases can start or end on a frame with no pose.** Their endpoints are
+boundaries derived from the neighbouring phases, not observations. Point phases
+— address, takeaway, top, finish — are always on frames where a pose was
+actually seen.
 
 **Metrics depend on the camera view, and this is enforced.** A metric declares
 which views it supports and is refused on the others before any arithmetic

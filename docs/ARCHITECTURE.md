@@ -82,6 +82,57 @@ golf_lab/storage/
   analysis_repository.py  swing_analysis.json + derived-result staleness
 ```
 
+### How phases are located, and why impact is a region
+
+All seven phases come from the path of the hands. Shoulder and hip rotation are
+more meaningful biomechanically, but they project very differently face-on
+versus down-the-line, so a detector built on them would have to be two
+detectors. Hand height and hand speed read similarly from either angle.
+
+```
+address ──► takeaway ──► top ──► downswing ──► impact region
+                                           └──► follow-through ──► finish
+```
+
+| Phase | How it is found |
+|---|---|
+| Address | last frame of the initial quiet period |
+| Takeaway | first frame of sustained motion — the same measurement as address, read from the other side |
+| Top | highest hands between address and peak hand speed |
+| Impact region | frames where the hands return to address height |
+| Downswing | between the top and the impact region |
+| Follow-through | between the impact region and the finish |
+| Finish | first sustained quiet after impact |
+
+Two of these deserve their reasoning spelled out.
+
+**The top is bounded by peak hand speed.** The finish usually has the hands
+just as high as the top, so "highest hands in the clip" finds the wrong one on
+about half of all swings. Peak hand speed is always the downswing, so searching
+only between address and that point separates them. The cost is a real
+limitation: on a clip containing *only* a backswing, peak speed falls inside
+the backswing and the bound collapses, so no top is reported. The detector
+refuses rather than guessing, and a test pins that.
+
+**Impact is a range, never a frame.** The clubhead is not tracked, so the hands
+only indicate roughly when the club came back through the ball — and at 30 fps
+the clubhead crosses the ball in well under one frame interval. Reporting an
+"impact frame" would be a precision the input cannot support. The half-width
+scales with frame rate, because a 240 fps clip genuinely localises it better.
+
+Three properties came out of tests failing against realistic synthetic swings:
+the hand path is smoothed before differentiating (raw differences of noisy
+landmarks measure jitter more than motion); motion must be *sustained* over
+several frames to count (one frame over threshold is noise); and the
+noise-floor term is capped relative to peak speed (on a clip moving from frame
+one, a percentile of the speeds measures the swing, not the noise).
+
+**Range endpoints may fall in a pose gap.** They are boundaries derived from
+neighbouring phases — the downswing runs from the frame after the top to the
+frame before impact — so a gap can land on one. The invariant that *is*
+enforced is that a **point** phase (address, takeaway, top, finish) never sits
+on a frame where no pose was observed.
+
 ### Camera-view gating lives in the registry, not the UI
 
 A single 2D camera cannot see what it is not pointed at. Lateral hip sway is

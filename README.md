@@ -35,6 +35,7 @@ trustworthy, the app says so instead of showing a number:
 |---|---|
 | **[v0.2.0](https://github.com/johnsonto07/golf-swing-lab/releases/tag/v0.2.0)** | Milestone 2 — video import, preview normalization, pose model management, inference, smoothing, overlay, per-swing storage. |
 | **`main` (unreleased)** | Everything in v0.2.0 **plus** the first Milestone 3 slice: address and top-of-backswing detection, camera-view metric gating, and the Phases tab. |
+| **`milestone-3-phases`** | Adds the remaining five phases — takeaway, downswing, impact region, follow-through, finish. Merges into `main` once push-triggered CI is confirmed green. |
 
 The tag is immutable and describes Milestone 2 only. If you want exactly what
 was released, check out `v0.2.0`; if you want the phase work, use `main`.
@@ -69,9 +70,10 @@ was released, check out `v0.2.0`; if you want the phase work, use `main`.
 > On real phone footage the pose stage typically detects 100% of frames; the
 > synthetic figure detects ~98%.
 
-### In progress (Milestone 3, first slice)
+### In progress (Milestone 3)
 
-**Address** and **top of backswing** detection from the hand path, with a
+**All seven swing phases** detected from the hand path — address, takeaway,
+top of backswing, downswing, impact region, follow-through, finish — with a
 camera-view-gated metric registry. A metric declares which views it supports
 and is refused on the others *before* any computation runs — lateral hip sway
 means something face-on and nothing down-the-line.
@@ -87,7 +89,7 @@ See the limitation below.
 
 <p align="center">
   <img src="docs/images/swing-analysis-phases.png" alt="Phases tab: detected phases and camera-view-gated metrics" width="90%">
-  <br><em>Phases — address and top located as preview frames, unattempted phases labelled as such, and metrics gated to the swing's camera view.</em>
+  <br><em>Phases — all seven located as preview frames, impact as a region rather than an instant, and metrics gated to the swing's camera view.</em>
 </p>
 
 **Not built yet:** reference comparison, ball tracer, and coaching. See the
@@ -255,10 +257,12 @@ presenting stale results as current.
 Click **Detect swing phases**. It reads the stored landmarks — no model, no
 network, about a millisecond — and reports:
 
-- **Address** and **top of backswing** as preview frame numbers, with
+- **all seven phases** as preview frame numbers or frame *ranges*, each with
   confidence and a jump-to button
-- every other phase as "not attempted by this detector", which is a different
-  statement from "attempted and failed"
+- **impact as a region**, never a single frame — the clubhead is not tracked
+- any phase that could not be found, with the reason, and any phase a narrower
+  detector did not attempt as "not attempted", which is a different statement
+  from "attempted and failed"
 - the metrics valid for this swing's camera view, each with a status and, when
   unavailable, the reason
 
@@ -360,7 +364,7 @@ not a green build. CI reports **371 passed, 10 skipped**: the 10 are the
 real-model integration tests, which skip by design because CI deliberately
 never downloads a model from a third party.
 
-381 tests covering metadata extraction, frame-rate parsing, rotation handling,
+412 tests covering metadata extraction, frame-rate parsing, rotation handling,
 frame accuracy, timestamp conversion, preview generation and orientation,
 filename sanitization, serialization round-trips, cache keys, diagnostics
 secret-safety, the full import pipeline, and all of Milestone 2: the pose
