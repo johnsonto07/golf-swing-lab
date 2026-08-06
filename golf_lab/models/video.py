@@ -81,11 +81,39 @@ class VideoMetadata(BaseModel):
     duration_seconds: float
     frame_count_is_estimated: bool = False
 
+    # Both rates as ffprobe reports them, kept separately because their
+    # disagreement is the signal for variable frame rate. `fps` above stays
+    # the single number the rest of the app uses.
+    avg_frame_rate: Optional[float] = None
+    r_frame_rate: Optional[float] = None
+
     probe_source: str = "unknown"  # "ffprobe" or "opencv"
 
     @property
     def is_portrait(self) -> bool:
         return self.height > self.width
+
+    @property
+    def is_variable_frame_rate(self) -> bool:
+        """Whether the source appears to be variable-frame-rate.
+
+        ffprobe's ``r_frame_rate`` is the *nominal* rate the container
+        advertises; ``avg_frame_rate`` is frames divided by duration. On
+        constant-frame-rate footage they agree. A real phone slow-motion clip
+        can report 25 nominal against 22.87 actual, which means the timeline
+        is not uniform and frame index cannot be converted to source time by
+        dividing by a single rate.
+
+        The 2% tolerance is deliberate: NTSC-style rates (60 vs 59.94) differ
+        by 0.1% and are perfectly constant, so a tighter threshold would flag
+        most normal footage.
+        """
+        if not self.avg_frame_rate or not self.r_frame_rate:
+            return False
+        larger = max(self.avg_frame_rate, self.r_frame_rate)
+        if larger <= 0:
+            return False
+        return abs(self.avg_frame_rate - self.r_frame_rate) / larger > 0.02
 
     def timestamp_for_frame(self, frame_index: int) -> float:
         """Presentation time in seconds of a 0-based frame index.
@@ -133,6 +161,13 @@ class SwingRecord(BaseModel):
     thumbnail_relpath: Optional[str] = None
 
     video: VideoMetadata
+    # Metadata of the generated proxy. Stored separately because it is a
+    # genuinely different timeline: FFmpeg normalizes a variable-frame-rate
+    # source to constant frame rate, so the preview can have a different
+    # frame count and a different frame rate from the original. Every
+    # interactive frame number in the app refers to THIS, not to `video`.
+    # Optional so records written before it existed still load.
+    preview_video: Optional[VideoMetadata] = None
     context: SwingContext = Field(default_factory=SwingContext)
 
     status: SwingStatus = SwingStatus.NOT_PROCESSED
@@ -142,3 +177,34 @@ class SwingRecord(BaseModel):
     analysis_version: str
 
     model_config = {"use_enum_values": False}
+
+    @property
+    def timeline_is_approximate(self) -> bool:
+        """Whether preview frame numbers cannot be trusted against the source.
+
+        True when the source is variable-frame-rate, or when the preview ended
+        up with a different frame count from the original. Either way, "frame
+        N of the preview" no longer means "frame N of your original file", and
+        timestamps derived from a single frame rate drift.
+
+        See docs/KNOWN_ISSUES.md (GSL-1).
+        """
+        if self.video.is_variable_frame_rate:
+            return True
+        if self.preview_video is None:
+            return False
+        return abs(self.preview_video.frame_count - self.video.frame_count) > 1
+
+    @property
+    def preview_frame_count(self) -> int:
+        """Frames you can actually step through. Falls back to the original."""
+        if self.preview_video and self.preview_video.frame_count > 0:
+            return self.preview_video.frame_count
+        return self.video.frame_count
+
+    @property
+    def preview_fps(self) -> float:
+        """Frame rate of the timeline the UI steps through."""
+        if self.preview_video and self.preview_video.fps > 0:
+            return self.preview_video.fps
+        return self.video.fps

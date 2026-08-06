@@ -4,7 +4,8 @@ version = "0.1.0"
 description = "Local golf swing analysis workspace (Video Lab, pose, phases, comparison, tracer, coaching)."
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
-license = { text = "Private / personal use" }
+license = { text = "MIT" }
+authors = [{ name = "Johnson To" }]
 
 # Versions below were selected by installing them together in a clean
 # virtual environment and confirming there were no resolver conflicts.

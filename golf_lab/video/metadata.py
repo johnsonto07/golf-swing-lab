@@ -116,9 +116,12 @@ def _probe_with_ffprobe(video_path: Path) -> VideoMetadata:
     else:
         display_width, display_height = coded_width, coded_height
 
-    fps = parse_frame_rate(vs.get("avg_frame_rate")) or parse_frame_rate(
-        vs.get("r_frame_rate")
-    )
+    avg_frame_rate = parse_frame_rate(vs.get("avg_frame_rate"))
+    r_frame_rate = parse_frame_rate(vs.get("r_frame_rate"))
+    # avg wins because it reflects the frames actually present; r_frame_rate
+    # is only the rate the container advertises. They disagree on VFR sources,
+    # which is exactly what `is_variable_frame_rate` reports on.
+    fps = avg_frame_rate or r_frame_rate
 
     duration = 0.0
     for candidate in (vs.get("duration"), fmt.get("duration")):
@@ -163,6 +166,8 @@ def _probe_with_ffprobe(video_path: Path) -> VideoMetadata:
         frame_count=frame_count,
         duration_seconds=float(duration),
         frame_count_is_estimated=estimated,
+        avg_frame_rate=avg_frame_rate or None,
+        r_frame_rate=r_frame_rate or None,
         probe_source="ffprobe",
     )
 

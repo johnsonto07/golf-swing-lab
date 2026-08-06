@@ -23,21 +23,66 @@ motion-capture system, and not a substitute for a coach who can see you swing.
   not measured and will never be inferred. Any statement about ball flight
   causes is therefore hedged.
 
-## Limits in the current version (Milestone 1)
+## Limits in the current version (Milestone 2)
 
-- No pose estimation yet — the Swing Analysis page is a placeholder.
-- No phase detection, comparison, tracer, coaching, or rendering yet.
+- Pose estimation and the skeleton overlay work; phase detection, comparison,
+  tracer, coaching, and rendering do not exist yet.
 - Recording-quality assessment (Pipeline B) is not implemented, so the app will
   not yet warn you that footage is unsuitable for a given analysis type.
 - History shows imported swings but no trends.
 - Swing deletion is intentionally not in the UI; remove folders yourself.
+- **Variable-frame-rate clips have an approximate timeline** — see the section
+  immediately below. This is the most consequential limitation in the build.
+
+## Variable frame rate: what is and is not reliable
+
+Everything interactive — scrubbing, pose, the overlay — reads the generated
+`preview.mp4`, never the original. For **constant-frame-rate** footage the two
+are frame-for-frame equivalent and this section does not apply.
+
+For **variable-frame-rate** footage (many phone "auto" modes, slow-motion
+clips, most screen recordings) it does. FFmpeg cannot put unevenly spaced
+frames into a browser-playable proxy without resampling them to a constant
+rate. A real test clip went from 484 source frames at 22.87 fps average to 438
+preview frames at a constant 25 fps.
+
+The app detects this, marks the swing `needs_review`, and shows a warning on
+both the Video Lab and Swing Analysis pages.
+
+**Still reliable on these clips:**
+
+- the pose overlay and every landmark position
+- per-joint and per-frame confidence
+- what the swing looks like at a given preview frame
+- saved frames and overlay exports
+
+**Not yet reliable on these clips:**
+
+- **Tempo** (backswing:downswing ratio) — derived from durations that are
+  measured on a resampled timeline
+- **Phase durations** — how long P1→P4 or P4→P7 actually took
+- **Frame-perfect comparison against the source** — preview frame N is not
+  original frame N, and the offset varies through the clip
+- **Any timestamp read as a time in your original file** — the displayed time
+  is preview time, which drifted about 9% by the end of the test clip
+
+None of these features are implemented yet, so the app is not currently showing
+you a wrong number. The restriction exists so that they are not built on a
+foundation that would make them wrong. Resolving it is a prerequisite for
+Milestone 3 tempo work and Milestone 5 export — tracked as **GSL-1** in
+[KNOWN_ISSUES.md](KNOWN_ISSUES.md).
+
+If you need trustworthy tempo today, record in a mode that produces constant
+frame rate, and check `Variable frame rate: no` in the Video Lab's Original
+file panel.
 
 ## Video handling caveats
 
 - **Constant-frame-rate assumption.** Timestamps are computed as
-  `frame_index / fps`. Variable-frame-rate video (some phone "auto" modes,
-  many screen recordings) will drift. Import compares the preview's frame count
-  against the original and flags the swing `needs_review` when they disagree.
+  `frame_index / fps` on the preview's timeline. See the section above for what
+  this costs on variable-frame-rate sources; import detects the case both by
+  comparing preview and original frame counts and by comparing the container's
+  nominal and average frame rates.
 - **Estimated frame counts.** When the container does not store `nb_frames`,
   the count is derived from `duration × fps` and shown as "(estimated)".
 - **Rotation is snapped to 90° steps.** Arbitrary rotation angles are not

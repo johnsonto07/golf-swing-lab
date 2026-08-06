@@ -66,6 +66,12 @@ and useless for ball tracking:
 
 ## ⬜ Milestone 3 — Swing phases and qualitative metrics
 
+> **Blocked on [GSL-1](KNOWN_ISSUES.md#gsl-1)** for tempo and phase durations.
+> Preview frames do not map back to source frames on variable-frame-rate video,
+> so any duration measured today is computed on a resampled timeline. Phase
+> *marking* can proceed; anything expressed in seconds or as a ratio must wait
+> for a verified per-frame preview→source mapping.
+
 - Manual marking of P1–P9; automatic suggestions for address, top, impact, finish
 - Audio-assisted impact suggestion; manual correction always wins
 - Tempo (backswing/downswing ratio), head movement, hip sway/depth,
@@ -83,6 +89,11 @@ and useless for ball tracking:
 - Compare against a pro, your personal best, or your average
 
 ## ⬜ Milestone 5 — Manual ball tracer
+
+> **Blocked on [GSL-1](KNOWN_ISSUES.md#gsl-1)** for the final render. Export
+> draws onto the *original* at full quality, which requires knowing the source
+> frame for each traced preview frame. On variable-frame-rate clips that
+> mapping does not currently exist.
 
 - Impact confirmation, click-to-place ball, additional visible points
 - Shot-shape and height presets seeding an editable spline

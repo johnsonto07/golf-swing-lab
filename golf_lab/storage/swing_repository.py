@@ -145,16 +145,25 @@ def import_swing(
         status = SwingStatus.READY
         status_detail = ""
         preview_meta = extract_metadata(preview_path)
-        if (
+
+        counts_disagree = (
             not video_metadata.frame_count_is_estimated
             and preview_meta.frame_count
             and abs(preview_meta.frame_count - video_metadata.frame_count) > 1
-        ):
+        )
+        if counts_disagree or video_metadata.is_variable_frame_rate:
             status = SwingStatus.NEEDS_REVIEW
             status_detail = (
-                f"Preview has {preview_meta.frame_count} frames but the original "
-                f"reports {video_metadata.frame_count}. Frame numbers may be offset; "
-                "this usually means the source is variable-frame-rate."
+                f"This clip is variable-frame-rate. The original has "
+                f"{video_metadata.frame_count} frames at ~{video_metadata.fps:.2f} fps "
+                f"average; the preview you step through has "
+                f"{preview_meta.frame_count} frames at {preview_meta.fps:.2f} fps. "
+                "Everything on screen refers to the preview timeline. Because the "
+                "source frames are not evenly spaced, preview frame numbers and "
+                "timestamps do not map exactly back to the original file. Body "
+                "analysis and the pose overlay are unaffected; tempo, phase "
+                "durations, and frame-perfect comparison against the source are "
+                "not reliable for this clip. See docs/KNOWN_ISSUES.md (GSL-1)."
             )
             logger.warning("%s: %s", swing_id, status_detail)
 
@@ -165,6 +174,7 @@ def import_swing(
             preview_relpath=preview_path.name,
             thumbnail_relpath=thumbnail_path.name if thumbnail_path else None,
             video=video_metadata,
+            preview_video=preview_meta,
             context=context,
             status=status,
             status_detail=status_detail,

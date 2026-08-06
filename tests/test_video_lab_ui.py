@@ -109,11 +109,29 @@ class TestVideoLabWithSwing:
         index = app.session_state["frame_index"]
         assert index == 5
 
-        expected_seconds = index / imported_swing.video.fps
+        # Labels say "Preview" deliberately: these are positions on the
+        # preview's timeline, which is not the same as the original's on
+        # variable-frame-rate footage. The fixture is CFR, so the numbers
+        # coincide here — the naming is what stops them being conflated.
+        expected_seconds = index / imported_swing.preview_fps
         metrics = {m.label: m.value for m in app.metric}
-        assert metrics["Frame"] == str(index)
+        assert metrics["Preview frame"] == str(index)
         # 5 frames at 30 fps = 0.167 s
-        assert f"{expected_seconds:06.3f}" in metrics["Timestamp"]
+        assert f"{expected_seconds:06.3f}" in metrics["Preview timestamp"]
+
+    def test_frame_counts_agree_between_slider_and_readout(self, imported_swing):
+        """The mismatch users hit: 'Frames: 484' beside a slider ending at 437.
+
+        The reported preview frame count must equal the slider's maximum plus
+        one, on every clip, regardless of what the original reports.
+        """
+        app = AppTest.from_file(VIDEO_LAB, default_timeout=90).run()
+        assert not app.exception
+
+        sliders = [s for s in app.slider if s.label == "Frame"]
+        assert sliders, "Frame slider is missing"
+
+        assert imported_swing.preview_frame_count == sliders[0].max + 1
 
     def test_save_frame_writes_into_exports(self, imported_swing, swing_root):
         app = AppTest.from_file(VIDEO_LAB, default_timeout=90).run()

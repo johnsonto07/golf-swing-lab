@@ -102,6 +102,16 @@ if record is None:
 st.subheader(record.original_filename)
 st.caption(f"swing id `{record.swing_id}`")
 
+if record.timeline_is_approximate:
+    st.warning(
+        "**Variable frame rate — frame numbers here are preview frame numbers.**\n\n"
+        "Pose runs on the preview, whose timeline was resampled to a constant "
+        "frame rate. The overlay and joint positions are unaffected, but frame "
+        "indices and timestamps do not map exactly back to your original file, "
+        "so tempo and phase-duration work is not reliable for this clip. "
+        "Tracked as GSL-1 in docs/KNOWN_ISSUES.md."
+    )
+
 try:
     video_path = swing_repository.preview_or_original_path(record)
 except SwingImportError as exc:

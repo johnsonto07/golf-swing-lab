@@ -204,6 +204,20 @@ with inspect_tab:
         if record.status_detail:
             st.warning(record.status_detail)
 
+        if record.timeline_is_approximate:
+            st.warning(
+                "**Variable frame rate — the preview timeline is approximate.**\n\n"
+                "The frames in your original are not evenly spaced in time, so "
+                "generating a browser-playable preview resampled them to a "
+                "constant rate. Preview frame numbers and timestamps therefore "
+                "do **not** map exactly back to the original file.\n\n"
+                "- Fine: the pose overlay, joint positions, and what the swing "
+                "looks like at a given preview frame.\n"
+                "- Not yet reliable: tempo ratios, phase durations, and lining a "
+                "preview frame up with an exact frame of the source.\n\n"
+                "Tracked as GSL-1 in docs/KNOWN_ISSUES.md."
+            )
+
         try:
             video_path = swing_repository.preview_or_original_path(record)
             stat = video_path.stat()
@@ -258,19 +272,31 @@ with inspect_tab:
                 st.stop()
 
             timestamp = reader.timestamp_for_frame(frame_index)
+            approximate = record.timeline_is_approximate
             st.image(
                 frame_rgb,
                 caption=(
-                    f"Frame {frame_index} of {last_index}  ·  "
+                    f"Preview frame {frame_index} of {last_index}  ·  "
                     f"t = {format_timestamp(timestamp)}  ·  {timestamp:.4f} s"
+                    + ("  ·  preview timeline (approximate vs source)" if approximate else "")
                 ),
                 use_container_width=True,
             )
 
             info_a, info_b, info_c = st.columns(3)
-            info_a.metric("Frame", f"{frame_index}")
-            info_b.metric("Timestamp", format_timestamp(timestamp))
-            info_c.metric("Frame rate", f"{meta.fps:.2f} fps")
+            info_a.metric("Preview frame", f"{frame_index}")
+            info_b.metric(
+                "Preview timestamp",
+                format_timestamp(timestamp),
+                help=(
+                    "Measured on the preview's constant-frame-rate timeline. "
+                    "For this clip that is not the same as time in the original "
+                    "file — see the warning above."
+                )
+                if approximate
+                else None,
+            )
+            info_c.metric("Preview frame rate", f"{reader.fps:.2f} fps")
 
         with sidebar_col:
             st.markdown("#### Save this frame")
@@ -321,23 +347,51 @@ with inspect_tab:
                 }
             )
 
-            st.markdown("#### Video properties")
+            st.markdown("#### Original file")
+            st.caption("Untouched. Used only for final export.")
             st.write(
                 {
                     "Display size": f"{meta.width} × {meta.height}",
                     "Stored size": f"{meta.coded_width} × {meta.coded_height}",
                     "Rotation applied": f"{meta.rotation_degrees}°",
-                    "Frame rate": f"{meta.fps:.3f} fps",
+                    "Frame rate (average)": f"{meta.fps:.3f} fps",
+                    "Frame rate (nominal)": (
+                        f"{meta.r_frame_rate:.3f} fps" if meta.r_frame_rate else "—"
+                    ),
                     "Frames": (
                         f"{meta.frame_count}"
                         + (" (estimated)" if meta.frame_count_is_estimated else "")
                     ),
                     "Duration": f"{meta.duration_seconds:.3f} s",
+                    "Variable frame rate": "yes" if meta.is_variable_frame_rate else "no",
                     "Video codec": meta.codec_name or "unknown",
                     "Audio": meta.audio_codec_name or "none",
                     "Probed with": meta.probe_source,
                 }
             )
+
+            st.markdown("#### Preview (what you are stepping through)")
+            preview_meta = record.preview_video
+            st.write(
+                {
+                    "Display size": (
+                        f"{preview_meta.width} × {preview_meta.height}"
+                        if preview_meta
+                        else f"{reader.width} × {reader.height}"
+                    ),
+                    "Frame rate": f"{reader.fps:.3f} fps",
+                    "Frames": f"{last_index + 1}",
+                    "Duration": (
+                        f"{preview_meta.duration_seconds:.3f} s" if preview_meta else "—"
+                    ),
+                    "Codec": "h264 (browser-safe, silent)",
+                }
+            )
+            st.caption(
+                "Every frame number, slider position, and timestamp in this app "
+                "refers to the preview."
+            )
+
             if meta.fps < 60:
                 st.info(
                     f"This clip is {meta.fps:.0f} fps. Body analysis will still work, "

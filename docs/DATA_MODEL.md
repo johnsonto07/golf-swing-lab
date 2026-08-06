@@ -38,13 +38,36 @@ whole `data/` folder can be moved or copied to another machine intact.
 | `width`, `height` | **display** dimensions, after rotation |
 | `rotation_degrees` | clockwise, snapped to 0/90/180/270 |
 | `fps` | from `avg_frame_rate`, else `r_frame_rate` |
+| `avg_frame_rate` | frames ÷ duration, i.e. the rate actually observed |
+| `r_frame_rate` | the nominal rate the container advertises |
 | `frame_count` | `nb_frames` when available |
 | `frame_count_is_estimated` | true when derived from `duration × fps` |
 | `duration_seconds` | stream duration, else container duration |
 | `probe_source` | `"ffprobe"` or `"opencv"` |
 
+Both rates are stored because **their disagreement is the variable-frame-rate
+signal**. `is_variable_frame_rate` is true when they differ by more than 2% —
+a tolerance chosen so NTSC-style rates (60 vs 59.94, a 0.1% difference on
+perfectly constant footage) are not flagged.
+
 Methods: `timestamp_for_frame`, `frame_for_timestamp`, `is_portrait`. Both
 conversions assume constant frame rate (see `LIMITATIONS.md`).
+
+### `SwingRecord.preview_video` — the second timeline
+
+A full `VideoMetadata` for the generated proxy, stored alongside the
+original's. It is not redundant: FFmpeg normalizes a variable-frame-rate
+source to constant frame rate, so the preview can have a different frame count
+*and* a different frame rate. A real clip produced 484 source frames at 22.87
+fps average against a 438-frame preview at 25 fps.
+
+**Every interactive frame number in the app refers to `preview_video`**, never
+to `video`. `preview_frame_count` and `preview_fps` are the accessors; both
+fall back to the original for records written before the field existed.
+
+`timeline_is_approximate` is true when the source is VFR or the counts
+disagree, and is what drives the on-screen warnings. See
+[KNOWN_ISSUES.md](KNOWN_ISSUES.md) (GSL-1).
 
 ### `SwingContext` — what the user reports, never guessed
 

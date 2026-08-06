@@ -3,6 +3,8 @@
 A local, private golf swing analysis workspace. Runs entirely on your own
 machine and opens in your browser. No account, no cloud, no API key.
 
+MIT licensed — see [LICENSE](LICENSE).
+
 **Current status: Milestones 1 and 2 complete.** You can import swing videos,
 step through them frame by frame, and run local pose estimation with a skeleton
 overlay and per-joint confidence. Swing phases, comparison, ball tracer, and
@@ -194,7 +196,7 @@ deleting its folder — the app deliberately does not delete your footage for yo
 pytest
 ```
 
-254 tests covering metadata extraction, frame-rate parsing, rotation handling,
+272 tests covering metadata extraction, frame-rate parsing, rotation handling,
 frame accuracy, timestamp conversion, preview generation and orientation,
 filename sanitization, serialization round-trips, cache keys, diagnostics
 secret-safety, the full import pipeline, and all of Milestone 2: the pose
@@ -224,6 +226,27 @@ claim about accuracy on real swings, which only your own footage can establish.
 
 ---
 
+## Known limitation: variable-frame-rate clips
+
+Everything interactive reads the generated preview, not your original. For
+constant-frame-rate footage the two are frame-for-frame equivalent. For
+**variable-frame-rate** footage (many phone auto modes, slow-motion, screen
+recordings) FFmpeg must resample to a constant rate to produce a
+browser-playable proxy, so preview frame numbers and timestamps do **not** map
+exactly back to your original file.
+
+The app detects this, marks the swing "Needs review", and warns you on both the
+Video Lab and Swing Analysis pages.
+
+- **Unaffected:** the pose overlay, joint positions, confidence, saved frames.
+- **Not yet reliable:** tempo ratios, phase durations, and frame-perfect
+  comparison against the source.
+
+None of those features exist yet, so no wrong number is being shown — the
+restriction exists so they are not built on a foundation that would make them
+wrong. Tracked as **GSL-1** in [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) and
+must be resolved before Milestone 3 tempo work or Milestone 5 export.
+
 ## Privacy
 
 - Everything runs locally. The **only** network access in the app is
@@ -249,6 +272,7 @@ claim about accuracy on real swings, which only your own footage can establish.
 | [DATA_MODEL.md](docs/DATA_MODEL.md) | on-disk formats, types, versioning |
 | [RECORDING_GUIDE.md](docs/RECORDING_GUIDE.md) | how to film swings that are actually analysable |
 | [LIMITATIONS.md](docs/LIMITATIONS.md) | **read this** — what 2D video can and cannot tell you |
+| [KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) | tracked defects, with IDs the UI references |
 
 ---
 
