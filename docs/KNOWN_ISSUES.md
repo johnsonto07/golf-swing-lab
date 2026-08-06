@@ -14,7 +14,9 @@ screen can be traced to a written explanation.
 
 ### Preserve source timestamps and map preview frames back to the source
 
-**Status:** open · **Found:** 2026-08-06, testing a real 4K HEVC phone clip ·
+**Status:** open ·
+**Tracked at:** <https://github.com/johnsonto07/golf-swing-lab/issues/1> ·
+**Found:** 2026-08-06, testing a real 4K HEVC phone clip ·
 **Blocks:** Milestone 3 (tempo and phase durations), Milestone 5 (ball-tracer
 export at original quality)
 
