@@ -51,9 +51,17 @@ from golf_lab.pose.model_manager import (  # noqa: E402
 from golf_lab.pose.overlay import OverlayStyle, draw_sequence_frame  # noqa: E402
 from golf_lab.pose.backend import PoseBackendError  # noqa: E402
 from golf_lab.pose.smoothing import SmoothingSettings, smooth_sequence  # noqa: E402
-from golf_lab.storage import pose_repository, swing_repository  # noqa: E402
+from golf_lab.storage import (  # noqa: E402
+    analysis_repository,
+    pose_repository,
+    swing_repository,
+)
 from golf_lab.storage.file_repository import exports_dir  # noqa: E402
 from golf_lab.storage.swing_repository import SwingImportError  # noqa: E402
+from golf_lab.swing import metric_registry  # noqa: E402
+from golf_lab.swing.geometry_detector import default_detector  # noqa: E402
+from golf_lab.swing.phases import PHASE_ORDER, SwingPhase  # noqa: E402
+from golf_lab.swing.results import ResultStatus  # noqa: E402
 from golf_lab.ui import FRAME_INDEX_KEY, page_setup, swing_selector  # noqa: E402
 from golf_lab.video.frame_reader import (  # noqa: E402
     FrameReader,
@@ -93,6 +101,11 @@ def _request_cancel() -> None:
     st.session_state[CANCEL_KEY] = True
 
 
+def _set_frame(frame_index: int) -> None:
+    """Jump the viewer to a specific preview frame (used by the phase list)."""
+    st.session_state[FRAME_INDEX_KEY] = int(frame_index)
+
+
 record = swing_selector("Swing to analyse")
 
 if record is None:
@@ -118,8 +131,8 @@ except SwingImportError as exc:
     st.error(f"Could not open this swing's video.\n\n{exc}")
     st.stop()
 
-analysis_tab, viewer_tab, model_tab = st.tabs(
-    ["Run analysis", "Skeleton overlay", "Model"]
+analysis_tab, viewer_tab, phases_tab, model_tab = st.tabs(
+    ["Run analysis", "Skeleton overlay", "Phases", "Model"]
 )
 
 # ------------------------------------------------------------------ Model
@@ -538,8 +551,157 @@ with viewer_tab:
                     use_container_width=True,
                 )
 
+# ---------------------------------------------------------------- Phases
+with phases_tab:
+    pose_info = pose_repository.load_info(record.swing_id)
+    if pose_info is None:
+        st.info(
+            "Phase detection reads the stored pose data. Run pose estimation "
+            "in the **Run analysis** tab first."
+        )
+        st.stop()
+
+    detector = default_detector()
+    stored = analysis_repository.load_analysis(record.swing_id)
+    stale = analysis_repository.staleness_reasons(
+        stored, pose_info, detector.name, detector.version
+    )
+
+    st.markdown("#### Swing phases")
+    st.caption(
+        f"Detector `{detector.name}` v{detector.version}. It locates address "
+        "and the top of the backswing from the hand path; the remaining phases "
+        "are not attempted yet and are listed as such rather than guessed."
+    )
+
+    if stored is not None and stale:
+        st.warning(
+            "**The stored phase detection is out of date.**\n\n"
+            + "\n".join(f"- {reason}" for reason in stale)
+            + "\n\nRe-run it below."
+        )
+
+    if st.button("Detect swing phases", type="primary", use_container_width=True):
+        sequence = pose_repository.load_smoothed(
+            record.swing_id
+        ) or pose_repository.load_raw(record.swing_id)
+        if sequence is None:
+            st.error("The stored pose data could not be read. Re-run pose estimation.")
+        else:
+            phases = detector.detect(
+                sequence,
+                record.context.camera_view,
+                timeline_is_approximate=record.timeline_is_approximate,
+            )
+            phase_frames = {
+                phase.value: frame
+                for phase in PHASE_ORDER
+                if (frame := phases.frame_for(phase)) is not None
+            }
+            metrics = metric_registry.evaluate_all(
+                sequence, record.context.camera_view, phase_frames
+            )
+            analysis_repository.save_analysis(
+                analysis_repository.SwingAnalysis(
+                    swing_id=record.swing_id,
+                    phases=phases,
+                    metrics=metrics,
+                    pose_created_at=pose_info.created_at,
+                    pose_video_fingerprint=pose_info.video_fingerprint,
+                )
+            )
+            st.success("Phase detection complete.")
+            st.rerun()
+
+    stored = analysis_repository.load_analysis(record.swing_id)
+    if stored is None:
+        st.info("Phases have not been detected for this swing yet.")
+        st.stop()
+
+    for note in stored.phases.notes:
+        st.warning(note)
+
+    st.markdown("##### Detected phases")
+    for phase in PHASE_ORDER:
+        result = stored.phases.get(phase)
+        if result is None:
+            st.markdown(
+                f"⚪ **{phase.display_name}** — not attempted by this detector"
+            )
+            continue
+
+        if result.status.is_usable:
+            seconds = result.preview_seconds(record.preview_fps)
+            timing = (
+                f" · preview t = {seconds:.3f}s" if seconds is not None else ""
+            )
+            confidence = (
+                f" · confidence {result.confidence:.2f}"
+                if result.confidence is not None
+                else ""
+            )
+            st.markdown(
+                f"{result.icon} **{phase.display_name}** — preview frame "
+                f"**{result.start_frame}**{timing}{confidence}"
+            )
+            if result.reason:
+                st.caption(result.reason)
+            st.button(
+                f"Jump to {phase.display_name}",
+                key=f"jump_{phase.value}",
+                on_click=_set_frame,
+                args=(result.start_frame,),
+            )
+        else:
+            st.markdown(
+                f"{result.icon} **{phase.display_name}** — {result.label}"
+            )
+            st.caption(result.reason)
+
+    st.markdown("##### Metrics")
+    view_name = record.context.camera_view.value.replace("_", " ")
+    st.caption(
+        f"This swing is recorded as **{view_name}**. Only metrics that a "
+        f"{view_name} camera can actually support are evaluated — the rest are "
+        "not applicable to this angle, rather than merely unavailable."
+    )
+    if not stored.metrics:
+        st.info(
+            f"No metrics are defined for a {view_name} view. Set the camera "
+            "view on the swing to face-on or down-the-line to see metrics."
+        )
+    for metric in stored.metrics:
+        left, right = st.columns([3, 2])
+        left.markdown(f"{metric.icon} **{metric.display_name}**")
+        spec_decimals = 2
+        try:
+            spec_decimals = metric_registry.get_spec(metric.key).decimals
+        except KeyError:
+            pass
+        right.markdown(
+            f"**{metric.display_value(spec_decimals)}**"
+            if metric.status.is_usable
+            else f"_{metric.label}_"
+        )
+        if metric.reason:
+            st.caption(metric.reason)
+
+    st.caption(
+        f"Detected {stored.phases.created_at[:19].replace('T', ' ')} UTC by "
+        f"`{stored.phases.detector_name}` v{stored.phases.detector_version} "
+        f"(schema v{stored.schema_version})."
+    )
+
+    st.divider()
+    st.info(
+        "**Not offered yet:** tempo ratios and phase durations in seconds. "
+        "Both need real source timing, which is blocked by GSL-1 "
+        "(docs/KNOWN_ISSUES.md). Phase positions above are preview frame "
+        "numbers, and preview timestamps are labelled as such."
+    )
+
 st.divider()
 st.caption(
-    "Swing phases (P1–P9), tempo, and qualitative metrics are Milestone 3. "
+    "Reference comparison, ball tracer, and coaching are later milestones. "
     "See docs/ROADMAP.md."
 )

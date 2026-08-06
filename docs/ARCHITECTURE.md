@@ -47,6 +47,91 @@ Streamlit, which is why the test suite never imports Streamlit.
 created as empty stub files — an empty module that imports cleanly but does
 nothing is worse than no module, because it hides which milestone you are on.
 
+### The four stages, and why they are separate
+
+It is easy to collapse "analysing a swing" into one step. It is four, and each
+consumes the previous one's output without mutating it:
+
+| Stage | Produces | Cost | Needs the model? |
+|---|---|---|---|
+| **Pose inference** | `pose_raw.npz` | tens of seconds | yes |
+| **Smoothing** | `pose_smoothed.npz` | milliseconds | no |
+| **Phase detection** | `swing_analysis.json` | milliseconds | no |
+| **Metric extraction** | same file | milliseconds | no |
+
+Only the first is expensive and irreproducible; its raw output is the evidence
+everything downstream rests on. The other three are pure functions of stored
+landmarks.
+
+That is why derived results live in a *separate file* with their own schema and
+detector version. Changing a phase-detection heuristic invalidates
+`swing_analysis.json` and nothing else — re-running it never touches MediaPipe
+and cannot degrade the landmarks it was computed from. Staleness is two-level:
+derived results go stale when the detector version, the schema, or the pose
+analysis they were derived from changes.
+
+```
+golf_lab/swing/
+  results.py            ResultStatus + MetricResult; the "no value without a
+                        status" rules, enforced in __post_init__
+  phases.py             SwingPhase, PhaseResult, SwingPhases, and the
+                        SwingPhaseDetector protocol
+  geometry_detector.py  first detector: address + top from the hand path
+  metric_registry.py    camera-view gating, landmark requirements, evaluation
+golf_lab/storage/
+  analysis_repository.py  swing_analysis.json + derived-result staleness
+```
+
+### Camera-view gating lives in the registry, not the UI
+
+A single 2D camera cannot see what it is not pointed at. Lateral hip sway is
+meaningful face-on and meaningless down-the-line; spine angle is the reverse.
+Computing one anyway yields a number that is not so much wrong as
+*meaningless* — and a meaningless number is worse than a missing one, because
+it looks like evidence.
+
+So a metric declares the views it supports and the landmarks it needs, and
+`metric_registry.evaluate` refuses on the wrong view **before any arithmetic
+runs**. The refusal is a first-class result with a reason, not a silent skip.
+Adding a metric means adding a spec and a compute function; it does not mean
+touching a page.
+
+### Confidence gating and the no-placeholder rule
+
+Every phase and metric result carries an explicit `ResultStatus`:
+
+`available` · `low_confidence` · `missing_landmarks` ·
+`unsupported_camera_view` · `insufficient_frames` · `blocked_by_timing` ·
+`detection_failed`
+
+Each names a *different remedy*, which is why they are not one "unavailable".
+Only `available` and `low_confidence` carry a value; the constructors raise if
+anything else does. `low_confidence` is deliberately in the first group — it is
+a real measurement to weigh, not a missing one, and it arrives with the reason
+attached.
+
+This is enforced rather than documented because the failure it prevents is
+silent: `0.0` displayed for a head that was never located reads as "no
+movement", and nothing downstream can tell the difference.
+
+A detector also declares `supported_phases` and simply omits the rest. "Not
+attempted by this detector" and "attempted and failed" are different facts, and
+conflating them hides the second one.
+
+### Preview timeline versus source timeline
+
+Phases are located as **preview frame indices**. On variable-frame-rate footage
+the preview was resampled, so a preview frame does not correspond to a known
+time in the original file. Anything expressed in seconds is therefore reported
+as *preview* time and labelled as such.
+
+Durations between phases are withheld entirely. Tempo is a ratio of two
+durations measured on a resampled timeline — it would look plausible and be
+wrong. `SwingPhases` deliberately exposes no `duration_seconds` or
+`tempo_ratio`, and a test asserts their absence, because the cheapest way to
+prevent a bad number is to make it impossible to ask for. See
+[KNOWN_ISSUES.md](KNOWN_ISSUES.md) (GSL-1).
+
 ### The `pose/` package and the optional-dependency rule
 
 MediaPipe is a large optional dependency. Nothing in `golf_lab.pose` may import

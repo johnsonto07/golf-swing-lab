@@ -59,8 +59,29 @@ trustworthy, the app says so instead of showing a number:
 > On real phone footage the pose stage typically detects 100% of frames; the
 > synthetic figure detects ~98%.
 
-**Not built yet:** swing phases, tempo, reference comparison, ball tracer, and
-coaching. See the [roadmap](#roadmap).
+### In progress (Milestone 3, first slice)
+
+**Address** and **top of backswing** detection from the hand path, with a
+camera-view-gated metric registry. A metric declares which views it supports
+and is refused on the others *before* any computation runs — lateral hip sway
+means something face-on and nothing down-the-line.
+
+Every phase and metric carries an explicit status — `available`,
+`low_confidence`, `missing_landmarks`, `unsupported_camera_view`,
+`insufficient_frames`, `blocked_by_timing`, `detection_failed` — and only the
+first two may carry a number. A missing measurement shows as "—", never `0.0`.
+
+**Tempo and phase durations are deliberately not offered**, because they need
+real source timing that variable-frame-rate clips do not currently provide.
+See the limitation below.
+
+<p align="center">
+  <img src="docs/images/swing-analysis-phases.png" alt="Phases tab: detected phases and camera-view-gated metrics" width="90%">
+  <br><em>Phases — address and top located as preview frames, unattempted phases labelled as such, and metrics gated to the swing's camera view.</em>
+</p>
+
+**Not built yet:** reference comparison, ball tracer, and coaching. See the
+[roadmap](#roadmap).
 
 ---
 
@@ -219,6 +240,22 @@ If a saved analysis is out of date — because the video changed or the analysis
 version moved — the page says so **before** showing its numbers, rather than
 presenting stale results as current.
 
+### The Phases tab
+
+Click **Detect swing phases**. It reads the stored landmarks — no model, no
+network, about a millisecond — and reports:
+
+- **Address** and **top of backswing** as preview frame numbers, with
+  confidence and a jump-to button
+- every other phase as "not attempted by this detector", which is a different
+  statement from "attempted and failed"
+- the metrics valid for this swing's camera view, each with a status and, when
+  unavailable, the reason
+
+Results are stored in `swing_analysis.json`, separate from the pose data.
+Re-running phase detection never re-runs MediaPipe and never touches the
+landmarks it was computed from.
+
 ---
 
 ## The pose model: what gets downloaded, and when
@@ -307,7 +344,7 @@ deleting its folder — the app deliberately does not delete your footage for yo
 pytest
 ```
 
-272 tests covering metadata extraction, frame-rate parsing, rotation handling,
+379 tests covering metadata extraction, frame-rate parsing, rotation handling,
 frame accuracy, timestamp conversion, preview generation and orientation,
 filename sanitization, serialization round-trips, cache keys, diagnostics
 secret-safety, the full import pipeline, and all of Milestone 2: the pose

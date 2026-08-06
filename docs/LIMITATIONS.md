@@ -76,6 +76,39 @@ If you need trustworthy tempo today, record in a mode that produces constant
 frame rate, and check `Variable frame rate: no` in the Video Lab's Original
 file panel.
 
+## Swing phases and metrics (Milestone 3, first slice)
+
+Only **address** and **top of backswing** are detected. Both come from the hand
+path, which is the one signal a single camera reads reliably from either angle.
+The other phases are not attempted, and the UI says "not attempted by this
+detector" rather than leaving a gap you might read as a failure.
+
+**Metrics depend on the camera view, and this is enforced.** A metric declares
+which views it supports and is refused on the others before any arithmetic
+runs. Lateral hip sway measured down-the-line would be a number describing
+mostly camera-axis motion — not wrong so much as meaningless, and meaningless
+numbers look like evidence.
+
+Currently computed:
+
+| Face-on | Down-the-line |
+|---|---|
+| Head sway, hip sway, shoulder tilt | Head movement, spine angle |
+
+Declared for a view but not yet computed (reported as such, never as a value):
+lead-arm angle, hip line, hip depth, posture change, shoulder line.
+
+**Every result carries a status.** `available`, `low_confidence`,
+`missing_landmarks`, `unsupported_camera_view`, `insufficient_frames`,
+`blocked_by_timing`, `detection_failed`. Only the first two carry a number —
+enforced in code, not just intended. A missing measurement displays as "—",
+never as `0.0`.
+
+**Not offered at all yet:** tempo ratios and phase durations in seconds. Both
+require real source timing and are blocked by GSL-1 below. The phase container
+deliberately exposes no duration field, so nothing downstream can accidentally
+compute one.
+
 ## Video handling caveats
 
 - **Constant-frame-rate assumption.** Timestamps are computed as

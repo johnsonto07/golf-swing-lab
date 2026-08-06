@@ -92,13 +92,40 @@ and useless for ball tracking:
 - lighting · motion blur · resolution · frame rate
 - face-on vs down-the-line suggestion (user-confirmable)
 
-## ⬜ Milestone 3 — Swing phases and qualitative metrics
+## 🔜 Milestone 3 — Swing phases and qualitative metrics
 
 > **Blocked on [GSL-1](KNOWN_ISSUES.md#gsl-1)** for tempo and phase durations.
 > Preview frames do not map back to source frames on variable-frame-rate video,
 > so any duration measured today is computed on a resampled timeline. Phase
 > *marking* can proceed; anything expressed in seconds or as a ratio must wait
 > for a verified per-frame preview→source mapping.
+
+### ✅ First vertical slice (delivered)
+
+- `golf_lab/swing/` package: result statuses, phase types, detector protocol,
+  camera-view metric registry, and the first detector
+- **Address** and **top of backswing** detection from the hand path, with
+  confidence and an explicit status
+- Camera-view gating as a registry: a metric declares the views it supports
+  and is refused on others *before* any computation runs
+- Seven quality states, with the invariant that only `available` and
+  `low_confidence` may carry a value — enforced in the constructors
+- Derived results stored separately in `swing_analysis.json` with their own
+  schema and detector version, so a detector change never invalidates or
+  overwrites the pose landmarks
+- Phases tab in the UI: detected phases with preview frame numbers, jump-to
+  buttons, per-metric status and reason, and the VFR warning retained
+- 107 tests covering the above
+
+### ⬜ Remaining in Milestone 3
+
+- Takeaway, downswing, impact region, follow-through, finish detection
+- Manual phase correction that outranks the automatic suggestion
+- Implement the declared-but-not-yet-computed metrics (lead-arm angle,
+  hip line, hip depth, posture change, shoulder line)
+- Audio-assisted impact suggestion
+- Qualitative classifications with low/medium/high confidence
+- 🚧 Tempo and phase durations in seconds — **blocked on GSL-1**
 
 - Manual marking of P1–P9; automatic suggestions for address, top, impact, finish
 - Audio-assisted impact suggestion; manual correction always wins
