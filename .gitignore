@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# Environment / secrets
+.env
+
+# User video data - never commit personal footage or generated media
+data/swings/*
+!data/swings/.gitkeep
+data/logs/
+*.mp4
+*.mov
+*.MOV
+*.MP4
+*.avi
+*.jpg
+*.jpeg
+*.png
+!docs/**/*.png
+!docs/**/*.jpg
+
+# Model weights (large binary files, never committed)
+models/*
+!models/README.md
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/

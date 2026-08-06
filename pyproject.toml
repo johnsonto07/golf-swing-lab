@@ -1,0 +1,40 @@
+[project]
+name = "golf-swing-lab"
+version = "0.1.0"
+description = "Local golf swing analysis workspace (Video Lab, pose, phases, comparison, tracer, coaching)."
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = { text = "Private / personal use" }
+
+# Versions below were selected by installing them together in a clean
+# virtual environment and confirming there were no resolver conflicts.
+# See docs/ARCHITECTURE.md ("Environment and dependency decisions") for
+# the reasoning behind each pin.
+dependencies = [
+    "streamlit==1.39.0",
+    "opencv-python==4.10.0.84",
+    "numpy==1.26.4",
+    "scipy==1.13.1",
+    "pydantic==2.9.2",
+    "psutil==6.0.0",
+]
+
+[project.optional-dependencies]
+# Not installed during Milestone 0/1. Pinned here so the version is
+# already decided when Milestone 2 (pose overlay) adds the dependency.
+pose = [
+    "mediapipe==0.10.14",
+]
+dev = [
+    "pytest==8.3.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["golf_lab*"]
