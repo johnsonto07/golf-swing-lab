@@ -7,7 +7,7 @@ screen can be traced to a written explanation.
 | ID | Title | Severity | Blocks |
 |---|---|---|---|
 | [GSL-1](#gsl-1) | Preview frames do not map back to source frames on VFR video | High | Milestone 3 tempo, Milestone 5 export |
-| [GSL-2](#gsl-2) | Push-triggered CI stopped after the default-branch rename | Resolved | — |
+| [GSL-2](#gsl-2) | Push-triggered CI stopped creating runs (GitHub Actions incident) | Resolved | — |
 
 ---
 
@@ -120,66 +120,78 @@ lands.
 
 ## GSL-2
 
-### Push-triggered CI stopped working after the default-branch rename
+### Push-triggered CI stopped creating runs
 
-**Status:** resolved 2026-08-06 · **Severity:** medium (CI silently stopped
-running on push; `workflow_dispatch` still worked, so the badge could go stale
-without anyone noticing)
+**Status:** resolved (platform-side) · **Severity:** medium — CI silently
+stopped running on push while `workflow_dispatch` kept working, so the workflow
+looked healthy while the badge could go stale unnoticed.
 
 ### Symptom
 
-After renaming the default branch `master` → `main` and deleting `master`,
-pushes to `main` created no workflow run. `workflow_dispatch` continued to work
-normally, so the workflow appeared healthy in the Actions UI.
+For roughly a three-hour window, pushes created no workflow run.
+`workflow_dispatch` continued to work, so nothing in the Actions UI looked
+wrong.
 
 ### What was ruled out
 
-Each of these was checked and found correct, so none of them was the cause:
+Every item below was checked and found correct, so none was the cause:
 
 | Checked | Result |
 |---|---|
-| Workflow file contents and triggers at the pushed commit | correct — `on.push.branches: [main]` |
-| Workflow present on the default branch | yes, identical to local |
-| Path/event filters | none that could exclude the commits |
+| Workflow contents and parsed triggers at the pushed commit | correct — `on.push.branches` matched the pushed branch |
+| Workflow present on the default branch | yes, byte-identical to local (no BOM, LF endings) |
+| Path / event filters | none that could exclude the commits |
 | Actions enabled for the repository | `enabled: true`, `allowed_actions: all` |
-| Rulesets / branch protection | none configured |
+| Rulesets / branch protection | none configured at the time |
 | Commit messages | no `[skip ci]`-style directives |
-| Push credential | HTTPS via Git Credential Manager as a real user, **not** `GITHUB_TOKEN` and not a GitHub App — and the *same* credential had triggered runs on `master` minutes earlier |
-| Hidden/skipped/deleted runs | Actions API `total_count` accounted for every run; none suppressed |
-| Workflow state via API | `active` |
+| Push credential | HTTPS via Git Credential Manager as a real user — **not** `GITHUB_TOKEN`, not a GitHub App — and the same credential had triggered runs minutes earlier |
+| Hidden / skipped / deleted runs | Actions API `total_count` accounted for every run |
+| Workflow state via API | `active` throughout |
 
-### Root cause
+### A hypothesis that was tested and disproved
 
-**A stale Actions workflow registration left behind by the branch rename.**
+The obvious suspect was a stale workflow registration left by the
+`master` → `main` rename: the workflow's `created_at` and `updated_at` were
+both still the moment it was first registered from a `master` push, despite the
+file changing on `main` since.
 
-Two pieces of evidence establish it:
+**Three remedies were applied and none restored push triggering:**
 
-1. **The workflow registration never updated.** `GET /actions/workflows/{id}`
-   reported `created_at == updated_at == 2026-08-06T10:23:54-07:00` — the
-   moment it was first registered from a `master` push — even though the file
-   had since been modified on `main`.
+1. Disabling and re-enabling the workflow (this did move `updated_at`).
+2. Re-saving the trigger block in materially equivalent form.
+3. Renaming `tests.yml` → `ci.yml`, which produced a genuinely new workflow id.
 
-2. **The push reached GitHub; only Actions ignored it.** For the pushed commit,
-   the other installed integrations (`vercel`, `cursor`, `render`) all created
-   check suites within seconds. GitHub Actions created **none**. The event was
-   delivered and dispatched; Actions alone did not evaluate it.
+And a controlled experiment killed the theory outright: a push to a brand-new
+`ci-diagnostic` branch, explicitly listed in the workflow's push filter, was
+**also** ignored. The fault was never specific to `main`, and never about the
+deleted branch.
 
-So the push-trigger binding remained associated with the deleted `master`
-branch. `workflow_dispatch` was unaffected because it addresses the workflow by
-ID rather than by branch binding.
+### Actual cause
 
-### Fix
+A transient GitHub Actions incident affecting **event-to-run creation**, not
+this repository's configuration. Three observations fix it as platform-side:
 
-1. Force re-registration: `PUT /actions/workflows/{id}/disable` then
-   `/enable`. This moved `updated_at` from `10:23:54` to `12:41:51`.
-2. Re-save `.github/workflows/tests.yml` with a materially equivalent trigger
-   (list style changed to block style) so the file is re-parsed on push.
+- GitHub's own managed dependency-graph workflow also stopped firing on pushes
+  over the same window.
+- Registration kept working throughout — pushing `ci.yml` created a new
+  workflow id — so pushes were being processed for some purposes but were not
+  producing runs.
+- Job scheduling degraded as well: a dispatched run sat queued for over ten
+  minutes and its three jobs were then cancelled without ever starting.
 
-No history was rewritten and the `v0.2.0` tag was not touched.
+Actions later recovered on its own: a dispatch completed in 80 seconds with all
+three Python jobs green.
 
 ### If it recurs
 
-Renaming a default branch is the trigger to watch. After any such rename,
-confirm that a push creates a run before trusting the badge — and compare
-`created_at` against `updated_at` on the workflow via the API, since a
-registration that never updates is the tell.
+Do not start by rewriting workflow files. Check in this order:
+
+1. Does `workflow_dispatch` work? If yes, the file and registration are fine.
+2. Do other integrations create check suites for the pushed commit while
+   `github-actions` creates none? That isolates it to Actions.
+3. Do dispatched jobs start promptly, or sit queued? A queue stall indicates a
+   platform incident rather than anything in the repository.
+4. Check <https://www.githubstatus.com/> before changing anything.
+
+The repository was left on `ci.yml`. The rename was unnecessary in hindsight but
+is harmless, and reverting it would churn the workflow id again for no benefit.
