@@ -194,7 +194,7 @@ deleting its folder — the app deliberately does not delete your footage for yo
 pytest
 ```
 
-244 tests covering metadata extraction, frame-rate parsing, rotation handling,
+254 tests covering metadata extraction, frame-rate parsing, rotation handling,
 frame accuracy, timestamp conversion, preview generation and orientation,
 filename sanitization, serialization round-trips, cache keys, diagnostics
 secret-safety, the full import pipeline, and all of Milestone 2: the pose
@@ -210,9 +210,17 @@ starts a model download**.
 
 Test fixture videos are **generated** by FFmpeg at test time, so no private
 golf footage ever enters the repository. Tests that need FFmpeg skip cleanly
-if it is not installed. The entire pose pipeline is tested through a fake
-backend, so the suite needs neither MediaPipe nor a downloaded model nor a
+if it is not installed. The pose pipeline is tested through a fake backend, so
+the bulk of the suite needs neither MediaPipe nor a downloaded model nor a
 network connection.
+
+`tests/test_pose_integration.py` is the exception: 10 tests that exercise the
+**real** MediaPipe backend against a real model file, verifying the landmark
+count, array shapes and dtypes, coordinate normalization, storage round-trip,
+and overlay drawing. They skip with a clear reason when MediaPipe is missing
+or no model has been downloaded. Their subject is a drawn figure, not real
+golf footage — enough to prove the plumbing is right, and deliberately not a
+claim about accuracy on real swings, which only your own footage can establish.
 
 ---
 
