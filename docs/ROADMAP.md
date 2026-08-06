@@ -1,6 +1,22 @@
 # Roadmap
 
-Status legend: ✅ done · 🔜 next · ⬜ planned
+Status legend: ✅ done · 🔜 next · ⬜ planned · 🚧 blocked
+
+## Blocked by [issue #1](https://github.com/johnsonto07/golf-swing-lab/issues/1) (GSL-1)
+
+Preview frames do not map back to source frames on variable-frame-rate video.
+Until a verified per-frame mapping exists, these specific features cannot be
+built correctly, regardless of which milestone they sit in:
+
+| 🚧 Blocked | Milestone |
+|---|---|
+| Reliable tempo ratios | 3 |
+| Reliable phase durations in seconds | 3 |
+| Frame-perfect source comparison | 3 / 4 |
+| Timing-sensitive ball-tracer export | 5 |
+
+Everything else in those milestones — phase *marking*, geometry metrics,
+normalization, overlay work — is unaffected and can proceed.
 
 ## ✅ Milestone 0 — Environment and architecture
 
@@ -30,6 +46,18 @@ Status legend: ✅ done · 🔜 next · ⬜ planned
   Streamlit pages
 
 ## ✅ Milestone 2 — Pose overlay
+
+**Complete and released as [v0.2.0](https://github.com/johnsonto07/golf-swing-lab/releases/tag/v0.2.0).**
+Verified end to end on real 4K HEVC phone footage: 438/438 frames detected,
+0.86 mean confidence. 272 local tests, CI green on Python 3.10–3.12.
+
+The variable-frame-rate timeline problem found during that verification is
+**not** unfinished Milestone 2 work — pose estimation, smoothing, the overlay,
+and storage are all complete and correct. It is a separate, pre-existing
+limitation of the preview proxy, tracked as
+[GSL-1 / issue #1](https://github.com/johnsonto07/golf-swing-lab/issues/1),
+and it gates specific *future* features (listed against Milestones 3 and 5)
+rather than anything delivered here.
 
 - MediaPipe Pose Landmarker model management with three selectable models
   (lite/full/heavy), recorded source, licence, version, size, and SHA-256
