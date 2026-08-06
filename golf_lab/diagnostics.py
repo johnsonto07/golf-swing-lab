@@ -30,6 +30,11 @@ from golf_lab.video.ffmpeg import find_ffmpeg
 
 TRACKED_PACKAGES = (
     "streamlit",
+    # The contrib build is the one this project depends on, because MediaPipe
+    # requires it and two cv2 distributions must not coexist. Plain
+    # opencv-python is listed too: seeing *both* installed is a real problem
+    # worth surfacing here rather than debugging later.
+    "opencv-contrib-python",
     "opencv-python",
     "numpy",
     "scipy",
@@ -56,6 +61,8 @@ class DiagnosticsReport:
     inference_device: str = "cpu"
     directories: List[Dict[str, Any]] = field(default_factory=list)
     openai_enabled: bool = False
+    pose_models: List[Dict[str, Any]] = field(default_factory=list)
+    dependency_warnings: List[str] = field(default_factory=list)
 
     def to_lines(self) -> List[str]:
         lines = [
@@ -96,11 +103,30 @@ class DiagnosticsReport:
             )
         lines += [
             "",
+            "Pose models",
+            "-" * 40,
+        ]
+        if self.pose_models:
+            for entry in self.pose_models:
+                lines.append(
+                    f"  {entry['key']:<16}: {entry['status']}"
+                    + (f" ({entry['detail']})" if entry.get("detail") else "")
+                )
+        else:
+            lines.append("  none downloaded (Swing Analysis will offer to fetch one)")
+
+        lines += [
+            "",
             "Optional cloud features",
             "-" * 40,
             f"  OpenAI coaching  : {'enabled' if self.openai_enabled else 'disabled'} "
             "(key value is never displayed)",
         ]
+
+        if self.dependency_warnings:
+            lines += ["", "Warnings", "-" * 40]
+            lines += [f"  ! {warning}" for warning in self.dependency_warnings]
+
         return lines
 
     def to_text(self) -> str:
@@ -211,9 +237,64 @@ def _directory_info() -> List[Dict[str, Any]]:
     return entries
 
 
+def _pose_model_info() -> List[Dict[str, Any]]:
+    """Which pose models are present, and whether they are intact.
+
+    Never downloads anything and never raises — diagnostics has to work on a
+    machine with no models and no MediaPipe.
+    """
+    try:
+        from golf_lab.pose.model_manager import available_specs, is_downloaded, verify_model
+    except Exception:  # noqa: BLE001 - diagnostics must never crash
+        return []
+
+    entries: List[Dict[str, Any]] = []
+    for spec in available_specs():
+        try:
+            if not is_downloaded(spec, MODELS_DIR):
+                continue
+            problem = verify_model(spec, MODELS_DIR)
+            entries.append(
+                {
+                    "key": spec.key,
+                    "status": "corrupt" if problem else "ok",
+                    "detail": problem or f"{spec.filename}",
+                }
+            )
+        except Exception:  # noqa: BLE001
+            entries.append({"key": spec.key, "status": "unknown", "detail": ""})
+    return entries
+
+
+def _dependency_warnings(packages: Dict[str, str]) -> List[str]:
+    """Flag dependency states known to cause confusing downstream failures."""
+    warnings: List[str] = []
+
+    contrib = packages.get("opencv-contrib-python", "not installed")
+    plain = packages.get("opencv-python", "not installed")
+    if contrib != "not installed" and plain != "not installed":
+        warnings.append(
+            "Both opencv-python and opencv-contrib-python are installed. They "
+            "share the cv2 namespace and must not coexist. Uninstall "
+            "opencv-python, then reinstall with: pip install -e \".[dev,pose]\""
+        )
+    elif contrib == "not installed" and plain == "not installed":
+        warnings.append("No OpenCV build is installed; video reading will fail.")
+
+    numpy_version = packages.get("numpy", "")
+    if numpy_version.startswith("2."):
+        warnings.append(
+            f"numpy {numpy_version} is installed, but MediaPipe 0.10.x and the "
+            "pinned OpenCV wheels are built against the numpy 1 ABI. Reinstall "
+            "with: pip install -e \".[dev,pose]\""
+        )
+    return warnings
+
+
 def collect_diagnostics() -> DiagnosticsReport:
     ffmpeg_tools = find_ffmpeg(required=False)
     gpu = _gpu_info()
+    packages = _package_versions()
 
     return DiagnosticsReport(
         app_version=APP_VERSION,
@@ -221,17 +302,19 @@ def collect_diagnostics() -> DiagnosticsReport:
         python_version=platform.python_version(),
         python_executable=sys.executable,
         platform_summary=f"{platform.system()} {platform.release()} ({platform.machine()})",
-        packages=_package_versions(),
+        packages=packages,
         ffmpeg_version=ffmpeg_tools.version if ffmpeg_tools else None,
         ffmpeg_path=ffmpeg_tools.ffmpeg if ffmpeg_tools else None,
         cpu=_cpu_info(),
         memory=_memory_info(),
         gpu=gpu,
-        # Milestone 1 does no inference at all; recorded here so the value is
-        # already meaningful when Milestone 2 adds pose estimation.
+        # Pose inference runs on CPU by default. The GPU delegate is opt-in per
+        # run from the Swing Analysis page and is not reflected here.
         inference_device="cpu",
         directories=_directory_info(),
         openai_enabled=openai_integration_enabled(),
+        pose_models=_pose_model_info(),
+        dependency_warnings=_dependency_warnings(packages),
     )
 
 

@@ -14,7 +14,12 @@ dependencies = [
     # 1.41.x is the earliest release where st.image accepts
     # use_container_width; the UI tests caught this on 1.39.
     "streamlit==1.41.1",
-    "opencv-python==4.10.0.84",
+    # The *contrib* build, not plain opencv-python. MediaPipe depends on
+    # opencv-contrib-python; installing both puts two distributions into the
+    # same `cv2` namespace, which upstream explicitly warns against. Contrib
+    # is a strict superset, so depending on it directly means one cv2 and no
+    # conflict once the pose extra is added.
+    "opencv-contrib-python==4.10.0.84",
     "numpy==1.26.4",
     "scipy==1.13.1",
     "pydantic==2.9.2",
@@ -22,10 +27,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Not installed during Milestone 0/1. Pinned here so the version is
-# already decided when Milestone 2 (pose overlay) adds the dependency.
+# Milestone 2. The transitive pins are not decoration: installing bare
+# `mediapipe==0.10.14` resolves opencv-contrib-python to 5.x, which drags in
+# numpy 2 and breaks every wheel built against the numpy 1 ABI. Constraining
+# numpy/scipy/opencv here keeps `pip install -e ".[pose]"` on the combination
+# that was actually verified to import and run together.
 pose = [
     "mediapipe==0.10.14",
+    "numpy==1.26.4",
+    "scipy==1.13.1",
+    "opencv-contrib-python==4.10.0.84",
 ]
 dev = [
     "pytest==8.3.3",

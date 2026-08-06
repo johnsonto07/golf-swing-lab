@@ -184,3 +184,100 @@ def swing_root(tmp_path) -> Path:
     root = tmp_path / "swings"
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+# --- pose fixtures ------------------------------------------------------
+class FakePoseBackend:
+    """A deterministic stand-in for a real pose backend.
+
+    Lets the inference loop, storage, staleness, and overlay be tested without
+    MediaPipe installed, without a downloaded model, and without the
+    frame-to-frame nondeterminism of a real detector. ``fail_frames`` drives
+    the undetected-frame paths, which are otherwise awkward to provoke on a
+    synthetic clip where a detector would either always or never find a pose.
+    """
+
+    def __init__(self, fail_frames=(), error_frames=(), jitter=0.0, seed=0):
+        self.name = "fake/test-backend"
+        self.device = "cpu"
+        self.fail_frames = set(fail_frames)
+        self.error_frames = set(error_frames)
+        self.jitter = jitter
+        self.calls = []
+        self.timestamps = []
+        self.closed = False
+        self._rng = __import__("numpy").random.default_rng(seed)
+
+    def detect(self, frame_rgb, timestamp_ms):
+        import numpy as np
+
+        from golf_lab.pose.backend import PoseBackendError, PoseFrameResult
+        from golf_lab.pose.landmarks import NUM_LANDMARKS
+
+        index = len(self.calls)
+        self.calls.append(index)
+        self.timestamps.append(timestamp_ms)
+
+        if index in self.error_frames:
+            raise PoseBackendError(f"synthetic backend failure on frame {index}")
+        if index in self.fail_frames:
+            return None
+
+        # A body that drifts steadily across the frame, so smoothing has a
+        # real trend to preserve and jitter to remove.
+        base = 0.25 + 0.5 * (index / 100.0)
+        landmarks = np.zeros((NUM_LANDMARKS, 3), dtype=np.float32)
+        landmarks[:, 0] = base
+        landmarks[:, 1] = np.linspace(0.1, 0.9, NUM_LANDMARKS)
+        landmarks[:, 2] = 0.0
+        if self.jitter:
+            landmarks[:, :2] += self._rng.normal(0, self.jitter, (NUM_LANDMARKS, 2))
+
+        return PoseFrameResult(
+            landmarks=landmarks,
+            world_landmarks=landmarks.copy(),
+            visibility=np.full(NUM_LANDMARKS, 0.9, dtype=np.float32),
+            presence=np.full(NUM_LANDMARKS, 0.95, dtype=np.float32),
+        )
+
+    def close(self):
+        self.closed = True
+
+
+@pytest.fixture()
+def fake_backend():
+    """Factory so each test can choose its own failure pattern."""
+    return FakePoseBackend
+
+
+@pytest.fixture()
+def pose_sequence_factory():
+    """Build a PoseSequence with a chosen set of undetected frames."""
+
+    def _build(frame_count=30, failed=(), fps=30.0, width=320, height=240, jitter=0.0, seed=1):
+        import numpy as np
+
+        from golf_lab.pose.landmarks import NUM_LANDMARKS
+        from golf_lab.pose.sequence import PoseSequence
+
+        rng = np.random.default_rng(seed)
+        sequence = PoseSequence.empty(frame_count, fps=fps, frame_width=width, frame_height=height)
+        for index in range(frame_count):
+            if index in set(failed):
+                sequence.mark_failed(index)
+                continue
+            landmarks = np.zeros((NUM_LANDMARKS, 3), dtype=np.float32)
+            landmarks[:, 0] = 0.2 + 0.6 * (index / max(frame_count - 1, 1))
+            landmarks[:, 1] = np.linspace(0.1, 0.9, NUM_LANDMARKS)
+            if jitter:
+                landmarks[:, :2] += rng.normal(0, jitter, (NUM_LANDMARKS, 2))
+            sequence.set_frame(
+                index,
+                landmarks=landmarks,
+                world_landmarks=landmarks.copy(),
+                visibility=np.full(NUM_LANDMARKS, 0.8, dtype=np.float32),
+                presence=np.full(NUM_LANDMARKS, 0.9, dtype=np.float32),
+            )
+        return sequence
+
+    return _build

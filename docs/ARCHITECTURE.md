@@ -42,10 +42,35 @@ Streamlit, which is why the test suite never imports Streamlit.
 
 ### Directories that exist now
 
-Only `models/`, `video/`, and `storage/` are implemented. `pose/`, `swing/`,
+`models/`, `video/`, `storage/`, and `pose/` are implemented. `swing/`,
 `tracer/`, and `coaching/` are described here and in `ROADMAP.md` rather than
 created as empty stub files — an empty module that imports cleanly but does
 nothing is worse than no module, because it hides which milestone you are on.
+
+### The `pose/` package and the optional-dependency rule
+
+MediaPipe is a large optional dependency. Nothing in `golf_lab.pose` may import
+it at module scope; `mediapipe_backend.py` imports it lazily inside the
+constructor and is the only file that touches it at all.
+
+That is not tidiness — it is what lets the landmark topology, the sequence
+container, smoothing, the overlay, and storage all be imported and tested on a
+machine that has never installed MediaPipe and never downloaded a model. The
+test suite drives the entire inference pipeline through a `FakePoseBackend`
+(`tests/conftest.py`), so progress, cancellation, failed-frame bookkeeping, and
+staleness are all covered without a model file or a network connection.
+
+```
+pose/
+  landmarks.py         33-point topology as plain data; no imports at all
+  sequence.py          PoseSequence + the .npz on-disk contract
+  backend.py           PoseBackend protocol + PoseFrameResult
+  mediapipe_backend.py the ONLY module that imports mediapipe
+  inference.py         drives a backend over a video; progress + cancellation
+  smoothing.py         Savitzky-Golay / moving average, gap-aware
+  overlay.py           skeleton drawing with confidence-based fading
+  model_manager.py     download, checksum, licence, manifest
+```
 
 ### Deviation from the proposed layout
 
@@ -145,11 +170,32 @@ Verified in a clean virtualenv before pinning:
 | streamlit | 1.41.1 | earliest release where `st.image` accepts `use_container_width` — the UI tests caught this failing on 1.39 |
 | opencv-python | 4.10.0.84 | last 4.x line verified against numpy 1.x |
 | numpy | **1.26.4** | pinned to 1.x deliberately — MediaPipe 0.10.x and OpenCV wheels are built against the numpy 1 ABI, and numpy 2 breaks them |
-| scipy | 1.13.1 | compatible with numpy 1.26 |
+| scipy | 1.13.1 | compatible with numpy 1.26; provides `savgol_filter` for pose smoothing |
 | pydantic | 2.9.2 | v2 API (`model_dump`, `model_validate`) used throughout |
 | psutil | 6.0.0 | optional-by-design hardware probing for diagnostics |
 | pytest | 8.3.3 | dev only |
-| mediapipe | 0.10.14 (extra) | **not installed yet**; version chosen now so Milestone 2 has no surprises |
+| mediapipe | 0.10.14 (extra) | Milestone 2; **its transitive deps must be pinned too** — see below |
+
+### Why `opencv-contrib-python`, not `opencv-python`
+
+MediaPipe depends on `opencv-contrib-python`. Installing plain `opencv-python`
+alongside it puts two distributions into the same `cv2` namespace, which
+upstream explicitly warns against. Contrib is a strict superset, so the project
+depends on it directly and there is exactly one `cv2`.
+
+### Why the `pose` extra re-pins numpy, scipy, and opencv
+
+Installing bare `mediapipe==0.10.14` resolves `opencv-contrib-python` to 5.x,
+which drags in numpy 2 and silently breaks every wheel built against the numpy
+1 ABI. This was observed in practice, not theorised: a plain
+`pip install mediapipe==0.10.14` upgraded numpy to 2.5.1 and opencv to 5.0.0,
+leaving two conflicting cv2 packages installed.
+
+The `pose` extra therefore repeats `numpy`, `scipy`, and
+`opencv-contrib-python` at their pinned versions. They are constraints, not
+decoration: without them `pip install -e ".[pose]"` does not produce the
+combination that was verified to import and run together. `pip check` passing
+is part of the definition of a working environment here.
 
 FFmpeg is an external system dependency, not a Python package. `find_ffmpeg`
 never crashes when it is missing — pages show an actionable install message and

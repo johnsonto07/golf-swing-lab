@@ -114,19 +114,66 @@ Both are written into every `SwingRecord` at import.
 }
 ```
 
-## Planned formats
+## `pose_raw.npz` / `pose_smoothed.npz` (Milestone 2, implemented)
 
-### `pose_raw.npz` / `pose_smoothed.npz` (Milestone 2)
+Written by `golf_lab/pose/sequence.py`. Compressed `.npz`, loaded with
+`allow_pickle=False` — these files are data, and a pickled array in one would
+be arbitrary code execution on load.
 
 ```
-landmarks   float32 [n_frames, n_landmarks, 3]   x, y normalized to frame; z relative
-visibility  float32 [n_frames, n_landmarks]
-presence    float32 [n_frames, n_landmarks]
-valid       bool    [n_frames]                   false = estimation failed, not interpolated
+format_version   int                                   currently 1
+landmarks        float32 [n_frames, 33, 3]             x, y normalized to frame; z relative depth
+world_landmarks  float32 [n_frames, 33, 3]             roughly metric, hip-centred
+visibility       float32 [n_frames, 33]                landmark not occluded
+presence         float32 [n_frames, 33]                landmark in frame at all
+detected         bool    [n_frames]                    false = estimation failed
+fps              float
+frame_width      int
+frame_height     int
+smoothing        str                                   e.g. "savgol(window=7, polyorder=2)"
+metadata_keys    str[]                                 free-form provenance, stored as
+metadata_values  str[]                                 two parallel string arrays
 ```
 
-Raw is always kept alongside smoothed so the smoothing method stays a
-reversible, configurable choice.
+Landmark order is MediaPipe's 33-point BlazePose topology, defined in
+`golf_lab/pose/landmarks.py`. **It is part of the on-disk contract** — the
+indices must not be rearranged without bumping `analysis_version`.
+
+Undetected frames hold **NaN**, never zeros. Zero is a valid coordinate and
+would silently place a joint in the top-left corner of the image. Nothing in
+the codebase fills those gaps in: `pixel_coordinates()` returns `None` for an
+undetected frame rather than an array of NaNs, so callers are forced to handle
+"no pose here" explicitly instead of drawing garbage.
+
+`format_version` is checked on load. A file written by a newer layout is
+refused rather than misread.
+
+Raw is always kept alongside smoothed, and smoothing never crosses a gap —
+each unbroken run of detected frames is filtered independently, because
+filtering across an undetected stretch would invent plausible-looking motion
+through frames where nothing was seen.
+
+### `pose_info.json` (Milestone 2, implemented)
+
+Provenance for one stored analysis, written **last** so it acts as the marker
+that a complete analysis exists:
+
+| Field | Notes |
+|---|---|
+| `model_key`, `model_filename`, `model_sha256` | which weights produced this |
+| `backend`, `device`, `mediapipe_version` | how it was computed |
+| `video_fingerprint` | name + size + mtime hash of the analysed video |
+| `frame_count`, `detected_count`, `detection_rate` | coverage |
+| `mean_confidence`, `longest_gap_frames` | quality |
+| `smoothing` | settings used, so the result is reproducible |
+| `analysis_version`, `app_version`, `pose_format_version` | staleness |
+| `created_at`, `elapsed_seconds` | when and how long |
+
+`staleness_reasons()` compares the stored fingerprint and versions against
+current ones and returns user-facing sentences. An empty list means the cached
+result is current; anything else is displayed before the numbers are shown.
+This is what prevents a skeleton computed from a since-replaced video being
+presented as if it were current.
 
 ### `phases.json` (Milestone 3)
 

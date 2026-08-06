@@ -29,18 +29,30 @@ Status legend: ✅ done · 🔜 next · ⬜ planned
 - 113 automated tests, including UI acceptance tests that drive the real
   Streamlit pages
 
-## 🔜 Milestone 2 — Pose overlay
+## ✅ Milestone 2 — Pose overlay
 
-- MediaPipe Pose Landmarker model management (`models/`, checksum, license, version)
-- Frame-by-frame inference with progress and cancellation
+- MediaPipe Pose Landmarker model management with three selectable models
+  (lite/full/heavy), recorded source, licence, version, size, and SHA-256
+- Downloads are **explicit only** — `ensure_model` refuses to fetch unless
+  told to, so opening a page never starts a network transfer
+- Integrity is trust-on-first-use and says so: the hash of what was actually
+  downloaded is recorded and verified on every later load, which catches
+  truncation and corruption without pretending to prove authenticity
+- Frame-by-frame inference in MediaPipe VIDEO mode (tracking state carries
+  between frames), with throttled progress and per-frame cancellation
 - `pose_raw.npz` and `pose_smoothed.npz` stored separately; raw always retained
-- Frames where estimation failed are recorded, **not** silently interpolated
-- Skeleton overlay on the preview with per-frame confidence
-- Pose caching keyed by video fingerprint + analysis version
-- CPU by default; optional GPU delegate where supported
+- Frames where estimation failed are recorded as failed and hold NaN — **never
+  interpolated**, and the UI says so on the frame itself
+- Smoothing (Savitzky-Golay or moving average) never crosses a gap; each run of
+  detected frames is filtered independently
+- Skeleton overlay with per-joint confidence: low-confidence joints are drawn
+  faded rather than hidden, so you can see *where* the model was unsure
+- Pose caching keyed by video fingerprint + analysis version, with staleness
+  surfaced as plain sentences before any numbers are shown
+- CPU by default; optional GPU delegate with a clear fallback message
 
-Suggested first slice: model download + inference on a single frame, then the
-whole clip, then the overlay.
+Deferred to Milestone 3, where it belongs with the measurements that need it:
+body-scale normalization and any use of `world_landmarks`.
 
 ## ⬜ Milestone 1b — Recording-quality assessment (Pipeline B)
 
