@@ -141,10 +141,15 @@ deleting its folder — the app deliberately does not delete your footage for yo
 pytest
 ```
 
-93 tests covering metadata extraction, frame-rate parsing, rotation handling,
+113 tests covering metadata extraction, frame-rate parsing, rotation handling,
 frame accuracy, timestamp conversion, preview generation and orientation,
 filename sanitization, serialization round-trips, cache keys, diagnostics
 secret-safety, and the full import pipeline.
+
+The last two files are UI acceptance tests: they run the real Streamlit page
+scripts and assert that Next/Previous move exactly one frame, that the
+displayed frame number and timestamp match, that saving a frame writes to
+`exports/`, and that the original file is untouched afterwards.
 
 Test fixture videos are **generated** by FFmpeg at test time, so no private
 golf footage ever enters the repository. Tests that need FFmpeg skip cleanly

@@ -26,7 +26,8 @@ Status legend: ✅ done · 🔜 next · ⬜ planned
 - Save any frame as PNG or JPEG
 - Per-swing directory storage, reopenable
 - Clear error and progress reporting
-- 93 automated tests
+- 113 automated tests, including UI acceptance tests that drive the real
+  Streamlit pages
 
 ## 🔜 Milestone 2 — Pose overlay
 
