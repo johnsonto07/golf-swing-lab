@@ -1,8 +1,15 @@
 name: tests
 
+# Re-saved 2026-08-06 to force Actions to re-register this workflow. After the
+# default branch was renamed master -> main and master was deleted, the
+# registration kept its original timestamp and pushes to main stopped creating
+# runs — other integrations received the same pushes, so the event was
+# delivered and only Actions ignored it. Triggers below are materially
+# unchanged; only the list style differs.
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   pull_request:
   workflow_dispatch:
 

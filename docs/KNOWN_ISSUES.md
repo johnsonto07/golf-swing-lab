@@ -7,6 +7,7 @@ screen can be traced to a written explanation.
 | ID | Title | Severity | Blocks |
 |---|---|---|---|
 | [GSL-1](#gsl-1) | Preview frames do not map back to source frames on VFR video | High | Milestone 3 tempo, Milestone 5 export |
+| [GSL-2](#gsl-2) | Push-triggered CI stopped after the default-branch rename | Resolved | — |
 
 ---
 
@@ -114,3 +115,71 @@ import, and `docs/LIMITATIONS.md` documents the restriction. Nothing in the app
 currently computes tempo or phase durations, so no incorrect number is being
 shown today — this issue must be resolved **before** Milestone 3 or Milestone 5
 lands.
+
+---
+
+## GSL-2
+
+### Push-triggered CI stopped working after the default-branch rename
+
+**Status:** resolved 2026-08-06 · **Severity:** medium (CI silently stopped
+running on push; `workflow_dispatch` still worked, so the badge could go stale
+without anyone noticing)
+
+### Symptom
+
+After renaming the default branch `master` → `main` and deleting `master`,
+pushes to `main` created no workflow run. `workflow_dispatch` continued to work
+normally, so the workflow appeared healthy in the Actions UI.
+
+### What was ruled out
+
+Each of these was checked and found correct, so none of them was the cause:
+
+| Checked | Result |
+|---|---|
+| Workflow file contents and triggers at the pushed commit | correct — `on.push.branches: [main]` |
+| Workflow present on the default branch | yes, identical to local |
+| Path/event filters | none that could exclude the commits |
+| Actions enabled for the repository | `enabled: true`, `allowed_actions: all` |
+| Rulesets / branch protection | none configured |
+| Commit messages | no `[skip ci]`-style directives |
+| Push credential | HTTPS via Git Credential Manager as a real user, **not** `GITHUB_TOKEN` and not a GitHub App — and the *same* credential had triggered runs on `master` minutes earlier |
+| Hidden/skipped/deleted runs | Actions API `total_count` accounted for every run; none suppressed |
+| Workflow state via API | `active` |
+
+### Root cause
+
+**A stale Actions workflow registration left behind by the branch rename.**
+
+Two pieces of evidence establish it:
+
+1. **The workflow registration never updated.** `GET /actions/workflows/{id}`
+   reported `created_at == updated_at == 2026-08-06T10:23:54-07:00` — the
+   moment it was first registered from a `master` push — even though the file
+   had since been modified on `main`.
+
+2. **The push reached GitHub; only Actions ignored it.** For the pushed commit,
+   the other installed integrations (`vercel`, `cursor`, `render`) all created
+   check suites within seconds. GitHub Actions created **none**. The event was
+   delivered and dispatched; Actions alone did not evaluate it.
+
+So the push-trigger binding remained associated with the deleted `master`
+branch. `workflow_dispatch` was unaffected because it addresses the workflow by
+ID rather than by branch binding.
+
+### Fix
+
+1. Force re-registration: `PUT /actions/workflows/{id}/disable` then
+   `/enable`. This moved `updated_at` from `10:23:54` to `12:41:51`.
+2. Re-save `.github/workflows/tests.yml` with a materially equivalent trigger
+   (list style changed to block style) so the file is re-parsed on push.
+
+No history was rewritten and the `v0.2.0` tag was not touched.
+
+### If it recurs
+
+Renaming a default branch is the trigger to watch. After any such rename,
+confirm that a push creates a run before trusting the badge — and compare
+`created_at` against `updated_at` on the workflow via the API, since a
+registration that never updates is the tell.
