@@ -11,6 +11,10 @@ Only the first stage needs the model. Everything here is a pure function of
 stored landmarks, so re-running it is cheap and cannot damage the pose data.
 """
 
+from golf_lab.swing.geometry_detector import (
+    HandPathPhaseDetector,
+    default_detector,
+)
 from golf_lab.swing.metric_registry import (
     MetricSpec,
     all_specs,
@@ -41,6 +45,7 @@ __all__ = [
     "PHASE_SCHEMA_VERSION",
     "STATUS_ICONS",
     "STATUS_LABELS",
+    "HandPathPhaseDetector",
     "MetricResult",
     "MetricSpec",
     "PhaseResult",
@@ -50,6 +55,7 @@ __all__ = [
     "SwingPhaseDetector",
     "SwingPhases",
     "all_specs",
+    "default_detector",
     "evaluate",
     "evaluate_all",
     "get_spec",
