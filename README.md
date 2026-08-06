@@ -29,6 +29,16 @@ trustworthy, the app says so instead of showing a number:
 - metrics that a camera angle cannot support are not offered for that angle
 - clips whose timeline cannot be trusted are flagged before any numbers appear
 
+## Releases and what's on `main`
+
+| | |
+|---|---|
+| **[v0.2.0](https://github.com/johnsonto07/golf-swing-lab/releases/tag/v0.2.0)** | Milestone 2 — video import, preview normalization, pose model management, inference, smoothing, overlay, per-swing storage. |
+| **`main` (unreleased)** | Everything in v0.2.0 **plus** the first Milestone 3 slice: address and top-of-backswing detection, camera-view metric gating, and the Phases tab. |
+
+The tag is immutable and describes Milestone 2 only. If you want exactly what
+was released, check out `v0.2.0`; if you want the phase work, use `main`.
+
 ## What works today (Milestone 2)
 
 | | |
@@ -344,7 +354,13 @@ deleting its folder — the app deliberately does not delete your footage for yo
 pytest
 ```
 
-379 tests covering metadata extraction, frame-rate parsing, rotation handling,
+CI runs the same suite on Python 3.10, 3.11 and 3.12 against `main`, plus
+`pip check` as a separate step — a green suite on a broken dependency set is
+not a green build. CI reports **371 passed, 10 skipped**: the 10 are the
+real-model integration tests, which skip by design because CI deliberately
+never downloads a model from a third party.
+
+381 tests covering metadata extraction, frame-rate parsing, rotation handling,
 frame accuracy, timestamp conversion, preview generation and orientation,
 filename sanitization, serialization round-trips, cache keys, diagnostics
 secret-safety, the full import pipeline, and all of Milestone 2: the pose
