@@ -1,11 +1,11 @@
 name: tests
 
-# Re-saved 2026-08-06 to force Actions to re-register this workflow. After the
-# default branch was renamed master -> main and master was deleted, the
-# registration kept its original timestamp and pushes to main stopped creating
-# runs — other integrations received the same pushes, so the event was
-# delivered and only Actions ignored it. Triggers below are materially
-# unchanged; only the list style differs.
+# Registered as ci.yml rather than tests.yml deliberately. Push events
+# stopped creating runs for the previous registration after the default
+# branch was renamed; disabling/re-enabling and re-saving that workflow did
+# not restore it, and a push to a brand-new branch listed in its triggers
+# was ignored too, so the fault was the registration rather than the file.
+# A new filename forces a fresh workflow id. See docs/KNOWN_ISSUES.md GSL-2.
 on:
   push:
     branches:

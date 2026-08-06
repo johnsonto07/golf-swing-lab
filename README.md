@@ -4,7 +4,7 @@
 run pose estimation on your own machine, and step through your swing frame by
 frame with a confidence-aware skeleton overlay.**
 
-[![tests](https://github.com/johnsonto07/golf-swing-lab/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/johnsonto07/golf-swing-lab/actions/workflows/tests.yml)
+[![tests](https://github.com/johnsonto07/golf-swing-lab/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/johnsonto07/golf-swing-lab/actions/workflows/ci.yml)
 [![Python 3.10–3.12](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
