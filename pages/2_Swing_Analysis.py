@@ -640,12 +640,28 @@ with phases_tab:
                 if result.confidence is not None
                 else ""
             )
+            # Ranges are shown as ranges. Collapsing the impact region to its
+            # centre frame would present a span the camera cannot resolve as a
+            # single instant.
+            if result.is_range:
+                span = (
+                    f"preview frames **{result.start_frame}–{result.end_frame}** "
+                    f"({result.end_frame - result.start_frame + 1} frames)"
+                )
+            else:
+                span = f"preview frame **{result.start_frame}**"
+
             st.markdown(
-                f"{result.icon} **{phase.display_name}** — preview frame "
-                f"**{result.start_frame}**{timing}{confidence}"
+                f"{result.icon} **{phase.display_name}** — {span}{timing}{confidence}"
             )
             if result.reason:
                 st.caption(result.reason)
+            if phase is SwingPhase.IMPACT_REGION:
+                st.caption(
+                    "Impact is reported as a region, not a frame: the clubhead "
+                    "is not tracked, and at this frame rate it crosses the ball "
+                    "in less than one frame."
+                )
             st.button(
                 f"Jump to {phase.display_name}",
                 key=f"jump_{phase.value}",

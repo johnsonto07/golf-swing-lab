@@ -228,6 +228,101 @@ class TestStaleness:
         assert not any("video" in r.lower() for r in reasons)
 
 
+class TestRangePhaseStorage:
+    def test_range_phases_survive_the_round_trip(self, analysis, swing_root):
+        """Ranges must keep both endpoints, not collapse to a start frame."""
+        repo.save_analysis(analysis, swing_root)
+        loaded = repo.load_analysis(SWING_ID, swing_root)
+
+        ranges = [r for r in analysis.phases.available if r.is_range]
+        assert ranges, "expected the synthetic swing to produce range phases"
+
+        for original in ranges:
+            restored = loaded.phases.get(original.phase)
+            assert restored.start_frame == original.start_frame
+            assert restored.end_frame == original.end_frame
+            assert restored.is_range
+
+    def test_impact_region_detail_survives(self, analysis, swing_root):
+        repo.save_analysis(analysis, swing_root)
+        loaded = repo.load_analysis(SWING_ID, swing_root)
+
+        impact = loaded.phases.get(SwingPhase.IMPACT_REGION)
+        if impact is None or not impact.status.is_usable:
+            pytest.skip("no impact region for this fixture")
+        assert "centre_frame" in impact.detail
+        assert "half_width_frames" in impact.detail
+
+    def test_all_seven_phases_persist(self, analysis, swing_root):
+        repo.save_analysis(analysis, swing_root)
+        loaded = repo.load_analysis(SWING_ID, swing_root)
+
+        from golf_lab.swing.phases import PHASE_ORDER
+
+        for phase in PHASE_ORDER:
+            assert loaded.phases.get(phase) is not None, f"{phase.value} lost"
+
+    def test_cascaded_failures_keep_their_status_and_reason(
+        self, swing_pose_factory, swing_root, tmp_path
+    ):
+        """An unavailable phase must not come back from disk looking located."""
+        import numpy as np
+
+        from golf_lab.pose import landmarks as lmk
+
+        swing_dir("cascade_swing", swing_root).mkdir(parents=True, exist_ok=True)
+        sequence = swing_pose_factory(address_frames=12, backswing_frames=30)
+        count = sequence.frame_count
+        drift = np.concatenate(
+            [
+                np.full(12, 0.45, dtype=np.float32),
+                np.linspace(0.45, 0.62, count - 12, dtype=np.float32),
+            ]
+        )
+        for wrist in (lmk.LEFT_WRIST, lmk.RIGHT_WRIST):
+            sequence.landmarks[:, wrist, 1] = np.full(count, 0.75, dtype=np.float32)
+            sequence.landmarks[:, wrist, 0] = drift
+
+        phases = default_detector().detect(sequence, CameraView.FACE_ON)
+        stored = repo.SwingAnalysis(swing_id="cascade_swing", phases=phases)
+        repo.save_analysis(stored, swing_root)
+
+        loaded = repo.load_analysis("cascade_swing", swing_root)
+        blocked = loaded.phases.get(SwingPhase.IMPACT_REGION)
+        assert not blocked.status.is_usable
+        assert blocked.start_frame is None
+        assert blocked.end_frame is None
+        assert blocked.reason
+
+
+class TestDetectorVersioning:
+    def test_detector_v1_analysis_is_stale_against_v2(self, analysis):
+        """The version bump must invalidate results from the older detector."""
+        analysis.phases.detector_version = "1"
+        detector = default_detector()
+        assert detector.version == "2"
+
+        reasons = repo.staleness_reasons(
+            analysis, FakePoseInfo(), detector.name, detector.version
+        )
+        assert any("detector version" in r for r in reasons)
+        assert repo.is_stale(analysis, FakePoseInfo(), detector.name, detector.version)
+
+    def test_current_detector_output_is_not_stale(self, analysis):
+        detector = default_detector()
+        assert (
+            repo.staleness_reasons(
+                analysis, FakePoseInfo(), detector.name, detector.version
+            )
+            == []
+        )
+
+    def test_stored_analysis_records_the_detector_version(self, analysis, swing_root):
+        repo.save_analysis(analysis, swing_root)
+        loaded = repo.load_analysis(SWING_ID, swing_root)
+        assert loaded.phases.detector_version == default_detector().version
+
+
 class TestVfrHonesty:
     def test_approximate_timeline_flag_survives_storage(
         self, swing_pose_factory, swing_root

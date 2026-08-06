@@ -169,6 +169,48 @@ class TestPhasesTabRenders:
         assert "schema v" in text.lower()
 
 
+class TestRangePhaseRendering:
+    def test_range_phases_render_as_ranges(self, swing_with_phases):
+        # Collapsing the impact region to a single frame would present a span
+        # the camera cannot resolve as an instant.
+        _, phases, _ = swing_with_phases
+        app = AppTest.from_file(SWING_ANALYSIS, default_timeout=120).run()
+        text = _all_text(app)
+
+        impact = phases.get(SwingPhase.IMPACT_REGION)
+        if impact and impact.status.is_usable and impact.is_range:
+            assert f"{impact.start_frame}–{impact.end_frame}" in text
+            assert "frames**" in text or "frames)" in text
+
+    def test_impact_region_carries_its_caveat(self, swing_with_phases):
+        _, phases, _ = swing_with_phases
+        impact = phases.get(SwingPhase.IMPACT_REGION)
+        if not (impact and impact.status.is_usable):
+            pytest.skip("no impact region detected for this fixture")
+
+        app = AppTest.from_file(SWING_ANALYSIS, default_timeout=120).run()
+        text = _all_text(app).lower()
+        assert "region, not a frame" in text
+        assert "clubhead is not tracked" in text
+
+    def test_every_located_phase_offers_a_jump_button(self, swing_with_phases):
+        _, phases, _ = swing_with_phases
+        app = AppTest.from_file(SWING_ANALYSIS, default_timeout=120).run()
+        labels = [b.label for b in app.button]
+
+        for outcome in phases.available:
+            assert f"Jump to {outcome.phase.display_name}" in labels
+
+    def test_unavailable_phases_offer_no_jump_button(self, swing_with_phases):
+        _, phases, _ = swing_with_phases
+        app = AppTest.from_file(SWING_ANALYSIS, default_timeout=120).run()
+        labels = [b.label for b in app.button]
+
+        for outcome in phases.attempted:
+            if not outcome.status.is_usable:
+                assert f"Jump to {outcome.phase.display_name}" not in labels
+
+
 class TestTimingHonesty:
     def test_tempo_is_not_offered(self, swing_with_phases):
         # GSL-1 is open. Nothing on this page may present tempo.
