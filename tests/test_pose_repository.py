@@ -14,6 +14,36 @@ from golf_lab.storage import pose_repository
 from golf_lab.storage.file_repository import swing_dir
 
 
+def _record_reporting_frames(frame_count: int):
+    """A SwingRecord whose *original* reports ``frame_count`` frames.
+
+    Only the video frame count matters to staleness, but the record is built
+    in full rather than mocked so the test breaks if the model changes shape.
+    """
+    from golf_lab.config import ANALYSIS_VERSION, APP_VERSION
+    from golf_lab.models.video import SwingRecord, VideoMetadata
+
+    return SwingRecord(
+        swing_id="20260101_120000_abcd1234",
+        original_filename="golfswingslow.mov",
+        original_relpath="original.mov",
+        preview_relpath="preview.mp4",
+        video=VideoMetadata(
+            path="original.mov",
+            coded_width=3840,
+            coded_height=2160,
+            width=2160,
+            height=3840,
+            rotation_degrees=90,
+            fps=22.873,
+            frame_count=frame_count,
+            duration_seconds=17.55,
+        ),
+        app_version=APP_VERSION,
+        analysis_version=ANALYSIS_VERSION,
+    )
+
+
 @pytest.fixture()
 def saved_analysis(tmp_path, swing_root, pose_sequence_factory):
     """A stored analysis plus the video it was computed from."""
@@ -149,6 +179,39 @@ class TestStaleness:
         _, _, _, _, info = saved_analysis
         reasons = pose_repository.staleness_reasons(info, tmp_path / "gone.mp4")
         assert reasons and "could not be read" in reasons[0]
+
+    def test_vfr_preview_frame_count_is_not_treated_as_stale(
+        self, saved_analysis, swing_root, pose_sequence_factory
+    ):
+        """A VFR swing must not be permanently stale the moment it is analysed.
+
+        Regression test for a bug found by running a real 4K HEVC phone clip
+        through the app. Pose runs on the preview, and FFmpeg normalizes a
+        variable-frame-rate source to CFR, so the preview had 438 frames while
+        the original reported 484. Comparing those two counts flagged the
+        analysis as out of date immediately after it was computed, with no way
+        to ever clear it -- which teaches the user to ignore the staleness
+        warning on exactly the clips where frame alignment matters most.
+        """
+        _, video, _, _, info = saved_analysis
+
+        # The analysis covers the preview's 438 frames; the record describes
+        # the 484-frame original. This is normal for VFR, not staleness.
+        info.frame_count = 438
+        vfr_record = _record_reporting_frames(484)
+
+        assert pose_repository.staleness_reasons(info, video, vfr_record) == []
+        assert not pose_repository.is_stale(info, video, vfr_record)
+
+    def test_a_genuinely_changed_video_is_still_caught(self, saved_analysis):
+        """The fix must not blunt the check that actually matters."""
+        _, video, _, _, info = saved_analysis
+        info.video_fingerprint = "0000000000000000"
+
+        reasons = pose_repository.staleness_reasons(
+            info, video, _record_reporting_frames(484)
+        )
+        assert any("video file has changed" in reason for reason in reasons)
 
     def test_reasons_are_user_facing_sentences(self, saved_analysis):
         _, video, _, _, info = saved_analysis

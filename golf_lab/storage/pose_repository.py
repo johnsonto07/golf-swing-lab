@@ -248,12 +248,22 @@ def staleness_reasons(
             f"It was computed with analysis version {info.analysis_version}; "
             f"this build uses version {ANALYSIS_VERSION}."
         )
-    if record is not None and info.frame_count and record.video.frame_count:
-        if abs(info.frame_count - record.video.frame_count) > 1:
-            reasons.append(
-                f"It covers {info.frame_count} frames but the swing now reports "
-                f"{record.video.frame_count}."
-            )
+    # Deliberately NOT compared: info.frame_count against
+    # record.video.frame_count. Pose runs on the *preview*, and for a
+    # variable-frame-rate source the preview legitimately has a different
+    # frame count from the original — FFmpeg normalizes VFR to CFR, so a
+    # 484-frame VFR original becomes a 438-frame preview. Comparing the two
+    # marked every VFR swing permanently stale the instant it was analysed,
+    # with no way to clear it, which trains the user to ignore the warning
+    # exactly where it matters most.
+    #
+    # The fingerprint above already covers the real case: it is computed on
+    # the file that was actually analysed, so any change to that file — a
+    # re-import, a regenerated preview — invalidates the analysis.
+    #
+    # The frame-count mismatch between original and preview is real and is
+    # already reported, once, where it belongs: as the swing's `needs_review`
+    # status at import time.
     return reasons
 
 
