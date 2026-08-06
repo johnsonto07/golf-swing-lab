@@ -142,7 +142,7 @@ Verified in a clean virtualenv before pinning:
 | Package | Pin | Why this version |
 |---|---|---|
 | Python | 3.10–3.12 | MediaPipe (Milestone 2) has no wheels for 3.13 |
-| streamlit | 1.39.0 | stable `st.cache_resource`, `use_container_width`, native multipage |
+| streamlit | 1.41.1 | earliest release where `st.image` accepts `use_container_width` — the UI tests caught this failing on 1.39 |
 | opencv-python | 4.10.0.84 | last 4.x line verified against numpy 1.x |
 | numpy | **1.26.4** | pinned to 1.x deliberately — MediaPipe 0.10.x and OpenCV wheels are built against the numpy 1 ABI, and numpy 2 breaks them |
 | scipy | 1.13.1 | compatible with numpy 1.26 |

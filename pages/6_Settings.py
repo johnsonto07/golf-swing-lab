@@ -61,12 +61,23 @@ st.caption(
 )
 
 st.subheader("Packages")
-st.table(
-    [{"package": name, "version": version} for name, version in report.packages.items()]
+# Rendered as markdown rather than st.table on purpose: st.table converts via
+# pandas and pyarrow, which is a heavy dependency path for a static two-column
+# list and has proven fragile across pyarrow/pandas builds.
+st.markdown(
+    "| Package | Version |\n|---|---|\n"
+    + "\n".join(f"| `{name}` | {version} |" for name, version in report.packages.items())
 )
 
 st.subheader("Storage")
-st.table(report.directories)
+st.markdown(
+    "| Location | Path | Writable | Free space |\n|---|---|---|---|\n"
+    + "\n".join(
+        f"| {entry['label']} | `{entry['path']}` | "
+        f"{'yes' if entry['writable'] else 'NO'} | {entry['free']} |"
+        for entry in report.directories
+    )
+)
 
 st.subheader("Cloud features")
 if report.openai_enabled:

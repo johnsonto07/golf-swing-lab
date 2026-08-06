@@ -11,7 +11,9 @@ license = { text = "Private / personal use" }
 # See docs/ARCHITECTURE.md ("Environment and dependency decisions") for
 # the reasoning behind each pin.
 dependencies = [
-    "streamlit==1.39.0",
+    # 1.41.x is the earliest release where st.image accepts
+    # use_container_width; the UI tests caught this on 1.39.
+    "streamlit==1.41.1",
     "opencv-python==4.10.0.84",
     "numpy==1.26.4",
     "scipy==1.13.1",
