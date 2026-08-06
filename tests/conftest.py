@@ -251,6 +251,115 @@ def fake_backend():
 
 
 @pytest.fixture()
+def swing_pose_factory():
+    """Build a deterministic synthetic *swing* as a PoseSequence.
+
+    Milestone 3 detectors are pure functions of landmarks, so they are tested
+    against generated arrays rather than video: no MediaPipe, no model, no
+    decoding, and — more importantly — a swing whose address and top frames are
+    known exactly, so a test can assert the detector found the right frame
+    rather than merely a plausible one.
+
+    The generated swing has the rhythm that matters: a still address, a slow
+    backswing, a fast downswing, and a finish with the hands high again (which
+    is what makes "highest hands" alone an insufficient rule for the top).
+    """
+
+    def _build(
+        address_frames: int = 12,
+        backswing_frames: int = 30,
+        downswing_frames: int = 8,
+        follow_frames: int = 25,
+        hand_visibility: float = 0.95,
+        body_visibility: float = 0.95,
+        failed_frames: tuple = (),
+        jitter: float = 0.0,
+        seed: int = 7,
+        fps: float = 30.0,
+        width: int = 720,
+        height: int = 1280,
+    ):
+        import numpy as np
+
+        from golf_lab.pose import landmarks as lmk
+        from golf_lab.pose.sequence import PoseSequence
+
+        rng = np.random.default_rng(seed)
+        total = address_frames + backswing_frames + downswing_frames + follow_frames
+        sequence = PoseSequence.empty(total, fps=fps, frame_width=width, frame_height=height)
+
+        # Swing angle: 0 at address, -1 at top, +1 at finish.
+        angle = np.concatenate(
+            [
+                np.zeros(address_frames),
+                -np.sin(np.linspace(0, np.pi / 2, backswing_frames)),
+                -np.cos(np.linspace(0, np.pi / 2, downswing_frames)),
+                np.sin(np.linspace(0, np.pi / 2, follow_frames)),
+            ]
+        )
+
+        shoulder_y, hip_y = 0.36, 0.55
+        half_shoulder = 0.09
+        hand_radius = 0.20
+
+        for index in range(total):
+            if index in set(failed_frames):
+                sequence.mark_failed(index)
+                continue
+
+            a = float(angle[index])
+            points = np.zeros((lmk.NUM_LANDMARKS, 3), dtype=np.float32)
+
+            # Torso is essentially still; the hands do the moving.
+            points[lmk.LEFT_SHOULDER] = (0.5 - half_shoulder, shoulder_y, 0.0)
+            points[lmk.RIGHT_SHOULDER] = (0.5 + half_shoulder, shoulder_y, 0.0)
+            points[lmk.LEFT_HIP] = (0.5 - 0.06, hip_y, 0.0)
+            points[lmk.RIGHT_HIP] = (0.5 + 0.06, hip_y, 0.0)
+            points[lmk.NOSE] = (0.5 + 0.02 * a, shoulder_y - 0.10, 0.0)
+            points[lmk.LEFT_KNEE] = (0.5 - 0.06, 0.72, 0.0)
+            points[lmk.RIGHT_KNEE] = (0.5 + 0.06, 0.72, 0.0)
+            points[lmk.LEFT_ANKLE] = (0.5 - 0.07, 0.88, 0.0)
+            points[lmk.RIGHT_ANKLE] = (0.5 + 0.07, 0.88, 0.0)
+
+            # Hands swing on an arc: down at address, high at top and finish.
+            hand_x = 0.5 + hand_radius * np.sin(a * np.pi * 0.55)
+            hand_y = hip_y + hand_radius * np.cos(a * np.pi * 0.55)
+            points[lmk.LEFT_WRIST] = (hand_x - 0.01, hand_y, 0.0)
+            points[lmk.RIGHT_WRIST] = (hand_x + 0.01, hand_y, 0.0)
+            points[lmk.LEFT_ELBOW] = (
+                (points[lmk.LEFT_SHOULDER][0] + hand_x) / 2,
+                (shoulder_y + hand_y) / 2,
+                0.0,
+            )
+            points[lmk.RIGHT_ELBOW] = (
+                (points[lmk.RIGHT_SHOULDER][0] + hand_x) / 2,
+                (shoulder_y + hand_y) / 2,
+                0.0,
+            )
+
+            if jitter:
+                points[:, :2] += rng.normal(0, jitter, (lmk.NUM_LANDMARKS, 2))
+
+            visibility = np.full(lmk.NUM_LANDMARKS, body_visibility, dtype=np.float32)
+            visibility[[lmk.LEFT_WRIST, lmk.RIGHT_WRIST]] = hand_visibility
+
+            sequence.set_frame(
+                index,
+                landmarks=points,
+                world_landmarks=points.copy(),
+                visibility=visibility,
+                presence=np.full(lmk.NUM_LANDMARKS, 0.95, dtype=np.float32),
+            )
+
+        # Expected phases, so tests assert against truth rather than output.
+        sequence.metadata["expected_address"] = str(address_frames - 1)
+        sequence.metadata["expected_top"] = str(address_frames + backswing_frames - 1)
+        return sequence
+
+    return _build
+
+
+@pytest.fixture()
 def pose_sequence_factory():
     """Build a PoseSequence with a chosen set of undetected frames."""
 
