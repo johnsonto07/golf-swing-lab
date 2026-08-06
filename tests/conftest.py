@@ -7,6 +7,7 @@ fixture reproducible on any machine.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -76,7 +77,22 @@ def _build_fixture_video(
     command.append(str(intermediate))
     subprocess.run(command, check=True, capture_output=True)
 
-    subprocess.run(
+    # `-display_rotation` is an *input* option and writes a real Display Matrix.
+    # The legacy `-metadata:s:v:0 rotate=` tag is the fallback for FFmpeg < 6;
+    # from FFmpeg 7 on it is silently ignored, which produced an unrotated
+    # fixture that made the rotation tests pass vacuously.
+    #
+    # The sign is deliberate: FFmpeg takes counter-clockwise degrees here, and
+    # a phone held in portrait writes rotation=-90, meaning "turn 90 clockwise
+    # to display". Passing -rotate_metadata reproduces that exactly.
+    stamping_attempts = (
+        [
+            ffmpeg_binary, "-y", "-hide_banner", "-loglevel", "error",
+            "-display_rotation", str(-rotate_metadata),
+            "-i", str(intermediate),
+            "-c", "copy",
+            str(destination),
+        ],
         [
             ffmpeg_binary, "-y", "-hide_banner", "-loglevel", "error",
             "-i", str(intermediate),
@@ -84,11 +100,57 @@ def _build_fixture_video(
             "-metadata:s:v:0", f"rotate={rotate_metadata}",
             str(destination),
         ],
-        check=True,
-        capture_output=True,
     )
+
+    for attempt in stamping_attempts:
+        result = subprocess.run(attempt, capture_output=True)
+        if result.returncode == 0 and _probed_rotation(ffmpeg_binary, destination):
+            intermediate.unlink(missing_ok=True)
+            return destination
+
     intermediate.unlink(missing_ok=True)
-    return destination
+    raise RuntimeError(
+        "Could not build a rotated fixture video: no rotation metadata survived. "
+        "Rotation tests would otherwise pass vacuously against an upright clip. "
+        f"FFmpeg binary: {ffmpeg_binary}"
+    )
+
+
+def _probed_rotation(ffmpeg_binary: str, video: Path) -> bool:
+    """Return True if ``video`` actually carries non-zero rotation metadata.
+
+    Verifying rather than trusting the stamping command is the whole point: a
+    fixture that quietly lost its rotation turns every rotation assertion into
+    a no-op.
+    """
+    ffprobe_binary = str(Path(ffmpeg_binary).with_name("ffprobe" + Path(ffmpeg_binary).suffix))
+    result = subprocess.run(
+        [
+            ffprobe_binary, "-v", "error",
+            "-select_streams", "v:0",
+            "-show_streams",
+            "-of", "json",
+            str(video),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return False
+    try:
+        streams = json.loads(result.stdout).get("streams") or []
+    except json.JSONDecodeError:
+        return False
+    if not streams:
+        return False
+
+    stream = streams[0]
+    if (stream.get("tags") or {}).get("rotate"):
+        return True
+    return any(
+        side_data.get("rotation")
+        for side_data in (stream.get("side_data_list") or [])
+    )
 
 
 @pytest.fixture(scope="session")
