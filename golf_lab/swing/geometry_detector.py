@@ -45,7 +45,7 @@ from golf_lab.swing.results import ResultStatus
 logger = get_logger(__name__)
 
 DETECTOR_NAME = "hand-path-geometry"
-DETECTOR_VERSION = "1"
+DETECTOR_VERSION = "2"
 
 # A swing needs enough frames to have a shape at all. Below this, whatever the
 # maxima happen to be is noise.
@@ -78,21 +78,45 @@ PATH_SMOOTHING_WINDOW = 3
 # The hands must rise at least this much (in shoulder widths) between address
 # and the candidate top, or the clip probably does not contain a backswing.
 MIN_BACKSWING_RISE = 0.35
+# The finish is the mirror of address: sustained quiet after the swing. The
+# golfer holds a finish position for a moment, so the same "several consecutive
+# frames" test applies rather than accepting one slow frame.
+SUSTAINED_QUIET_FRAMES = 3
+# Half-width of the impact region, in frames at 30 fps, scaled with frame rate.
+# Impact is reported as a REGION and never as a frame: without clubhead
+# tracking the hands only tell us roughly when they returned to ball height,
+# and at 30 fps the clubhead crosses the ball in far less than one frame.
+IMPACT_HALF_WIDTH_AT_30FPS = 2
+# The hands must come back down to within this many shoulder widths of their
+# address height for a pass to count as an impact region.
+MAX_IMPACT_HEIGHT_ERROR = 0.55
 
 
 class HandPathPhaseDetector:
-    """Locates address and top of backswing from the hand path.
+    """Locates the swing phases from the hand path.
 
     Camera-view agnostic by design — it uses hand height and speed, which read
     similarly face-on and down-the-line. It still receives the camera view
     because the protocol passes it and future detectors will need it.
+
+    Phases are found in dependency order, and each one that cannot be found
+    stops its dependents with a reason naming what was missing rather than
+    substituting a guess:
+
+        address ──► takeaway ──► top ──► downswing ──► impact region
+                                                   └──► follow-through ──► finish
     """
 
     name = DETECTOR_NAME
     version = DETECTOR_VERSION
     supported_phases: Sequence[SwingPhase] = (
         SwingPhase.ADDRESS,
+        SwingPhase.TAKEAWAY,
         SwingPhase.TOP_OF_BACKSWING,
+        SwingPhase.DOWNSWING,
+        SwingPhase.IMPACT_REGION,
+        SwingPhase.FOLLOW_THROUGH,
+        SwingPhase.FINISH,
     )
 
     def detect(
@@ -139,23 +163,39 @@ class HandPathPhaseDetector:
                     SwingPhase.ADDRESS, ResultStatus.DETECTION_FAILED, reason
                 )
             )
-            phases.set(
-                PhaseResult.unavailable(
+            self._block_dependents(
+                phases,
+                (
+                    SwingPhase.TAKEAWAY,
                     SwingPhase.TOP_OF_BACKSWING,
-                    ResultStatus.DETECTION_FAILED,
-                    "The top of the backswing is searched for after address, "
-                    "which was not found.",
-                )
+                    SwingPhase.DOWNSWING,
+                    SwingPhase.IMPACT_REGION,
+                    SwingPhase.FOLLOW_THROUGH,
+                    SwingPhase.FINISH,
+                ),
+                "address",
             )
             return phases
 
-        address_frame, address_confidence = address
+        address_frame, address_confidence, motion_start = address
         phases.set(
             PhaseResult.found(
                 SwingPhase.ADDRESS,
                 frame=address_frame,
                 confidence=address_confidence,
                 detail={"method": "end of initial low-motion period"},
+            )
+        )
+
+        # --- takeaway: where sustained motion begins --------------------
+        phases.set(
+            PhaseResult.found(
+                SwingPhase.TAKEAWAY,
+                frame=motion_start,
+                confidence=address_confidence,
+                detail={
+                    "method": "first frame of sustained hand motion after address",
+                },
             )
         )
 
@@ -170,6 +210,16 @@ class HandPathPhaseDetector:
                     "truncated, or may not contain a full swing.",
                 )
             )
+            self._block_dependents(
+                phases,
+                (
+                    SwingPhase.DOWNSWING,
+                    SwingPhase.IMPACT_REGION,
+                    SwingPhase.FOLLOW_THROUGH,
+                    SwingPhase.FINISH,
+                ),
+                "the top of the backswing",
+            )
             return phases
 
         top_frame, top_confidence, detail = top
@@ -181,7 +231,136 @@ class HandPathPhaseDetector:
                 detail=detail,
             )
         )
+
+        # --- impact region: hands back to address height ----------------
+        impact = self._detect_impact_region(
+            pose_sequence, hands, usable, address_frame, top_frame
+        )
+        if impact is None:
+            phases.set(
+                PhaseResult.unavailable(
+                    SwingPhase.IMPACT_REGION,
+                    ResultStatus.DETECTION_FAILED,
+                    "The hands never returned close to their address height after "
+                    "the top, so there is no evidence of a downswing through the "
+                    "ball. The clip may end before impact.",
+                )
+            )
+            self._block_dependents(
+                phases,
+                (SwingPhase.DOWNSWING, SwingPhase.FOLLOW_THROUGH, SwingPhase.FINISH),
+                "the impact region",
+            )
+            return phases
+
+        impact_start, impact_end, impact_confidence, impact_detail = impact
+        phases.set(
+            PhaseResult.found(
+                SwingPhase.IMPACT_REGION,
+                frame=impact_start,
+                end_frame=impact_end,
+                confidence=impact_confidence,
+                detail=impact_detail,
+            )
+        )
+
+        # --- downswing: between the top and impact ----------------------
+        if impact_start - 1 >= top_frame + 1:
+            phases.set(
+                PhaseResult.found(
+                    SwingPhase.DOWNSWING,
+                    frame=top_frame + 1,
+                    end_frame=impact_start - 1,
+                    confidence=min(top_confidence, impact_confidence),
+                    detail={"method": "frames between the top and the impact region"},
+                )
+            )
+        else:
+            phases.set(
+                PhaseResult.unavailable(
+                    SwingPhase.DOWNSWING,
+                    ResultStatus.INSUFFICIENT_FRAMES,
+                    f"The top (frame {top_frame}) and the impact region (frame "
+                    f"{impact_start}) are adjacent, leaving no frames between them. "
+                    "A higher frame rate is needed to resolve the downswing.",
+                )
+            )
+
+        # --- finish: sustained quiet after impact -----------------------
+        finish = self._detect_finish(hands, usable, speed, impact_end)
+        if finish is None:
+            phases.set(
+                PhaseResult.unavailable(
+                    SwingPhase.FINISH,
+                    ResultStatus.DETECTION_FAILED,
+                    "The hands are still moving when the clip ends, so no held "
+                    "finish position was found. Record a moment longer after the "
+                    "ball is struck.",
+                )
+            )
+            phases.set(
+                PhaseResult.unavailable(
+                    SwingPhase.FOLLOW_THROUGH,
+                    ResultStatus.INSUFFICIENT_FRAMES,
+                    "The follow-through runs from impact to the finish, which was "
+                    "not found.",
+                )
+            )
+            return phases
+
+        finish_frame, finish_confidence = finish
+        phases.set(
+            PhaseResult.found(
+                SwingPhase.FINISH,
+                frame=finish_frame,
+                confidence=finish_confidence,
+                detail={"method": "first sustained low-motion frame after impact"},
+            )
+        )
+
+        # --- follow-through: between impact and the finish --------------
+        if finish_frame - 1 >= impact_end + 1:
+            phases.set(
+                PhaseResult.found(
+                    SwingPhase.FOLLOW_THROUGH,
+                    frame=impact_end + 1,
+                    end_frame=finish_frame - 1,
+                    confidence=min(impact_confidence, finish_confidence),
+                    detail={
+                        "method": "frames between the impact region and the finish"
+                    },
+                )
+            )
+        else:
+            phases.set(
+                PhaseResult.unavailable(
+                    SwingPhase.FOLLOW_THROUGH,
+                    ResultStatus.INSUFFICIENT_FRAMES,
+                    f"The impact region ends at frame {impact_end} and the finish "
+                    f"is at frame {finish_frame}, leaving no frames between them.",
+                )
+            )
+
         return phases
+
+    @staticmethod
+    def _block_dependents(
+        phases: SwingPhases, dependents: Sequence[SwingPhase], missing: str
+    ) -> None:
+        """Mark phases unavailable because something they depend on is missing.
+
+        Reported as INSUFFICIENT_FRAMES rather than DETECTION_FAILED: nothing
+        was attempted and failed here — the search never ran, and saying so
+        keeps a genuine detection failure distinguishable from a cascade.
+        """
+        for phase in dependents:
+            phases.set(
+                PhaseResult.unavailable(
+                    phase,
+                    ResultStatus.INSUFFICIENT_FRAMES,
+                    f"Not searched for, because {missing} was not found.",
+                )
+            )
 
     # -- checks ----------------------------------------------------------
     def _precheck(
@@ -289,8 +468,14 @@ class HandPathPhaseDetector:
     # -- phases ----------------------------------------------------------
     def _detect_address(
         self, path: np.ndarray, usable: np.ndarray, speed: np.ndarray
-    ) -> Optional[Tuple[int, float]]:
-        """Last frame of the initial quiet period."""
+    ) -> Optional[Tuple[int, float, int]]:
+        """Last frame of the initial quiet period.
+
+        Returns ``(address_frame, confidence, motion_start)``. ``motion_start``
+        is the first frame of sustained motion, which is the takeaway — the two
+        are the same measurement read from either side, so deriving both here
+        keeps them from ever disagreeing.
+        """
         finite = speed[np.isfinite(speed)]
         if finite.size == 0:
             return None
@@ -358,7 +543,7 @@ class HandPathPhaseDetector:
         confidence = float(
             np.clip(0.35 + 0.5 * min(quiet_span / 8.0, 1.0) + 0.15 * (1 - separation), 0, 1)
         )
-        return address, confidence
+        return address, confidence, motion_start
 
     def _detect_top(
         self,
@@ -406,6 +591,116 @@ class HandPathPhaseDetector:
             "rise_shoulder_widths": round(rise_in_widths, 3),
         }
         return top_frame, confidence, detail
+
+    def _detect_impact_region(
+        self,
+        sequence: PoseSequence,
+        path: np.ndarray,
+        usable: np.ndarray,
+        address_frame: int,
+        top_frame: int,
+    ) -> Optional[Tuple[int, int, float, Dict[str, object]]]:
+        """A frame *range* around the hands returning to address height.
+
+        Reported as a region on principle, not as a hedge. Without clubhead
+        tracking the hands only indicate roughly when the club came back
+        through the ball, and at 30 fps the clubhead crosses the ball in well
+        under a single frame — so a specific "impact frame" would be a
+        precision this input cannot support. The half-width scales with frame
+        rate, because a 240 fps clip genuinely localises it better.
+        """
+        after_top = np.arange(len(path)) > top_frame
+        candidates = after_top & usable
+        if not candidates.any():
+            return None
+
+        scale = self._shoulder_width(sequence, address_frame)
+        if scale <= 1e-6:
+            return None
+
+        address_height = path[address_frame, 1]
+        # Descent back toward the ball: the frame whose hand height is closest
+        # to where it started.
+        error = np.where(candidates, np.abs(path[:, 1] - address_height), np.inf)
+        centre = int(np.argmin(error))
+        best_error = float(error[centre] / scale)
+        if not np.isfinite(best_error) or best_error > MAX_IMPACT_HEIGHT_ERROR:
+            return None
+
+        fps = sequence.fps if sequence.fps > 0 else 30.0
+        half_width = max(1, int(round(IMPACT_HALF_WIDTH_AT_30FPS * fps / 30.0)))
+        start = max(top_frame + 1, centre - half_width)
+        end = min(len(path) - 1, centre + half_width)
+
+        # Closer return to address height means a more confident region; a
+        # wider window relative to the clip means a vaguer one.
+        closeness = 1.0 - min(best_error / MAX_IMPACT_HEIGHT_ERROR, 1.0)
+        hand_visibility = float(
+            np.max(sequence.visibility[centre, [lm.LEFT_WRIST, lm.RIGHT_WRIST]])
+        )
+        confidence = float(np.clip(0.25 + 0.5 * closeness + 0.25 * hand_visibility, 0, 1))
+
+        detail: Dict[str, object] = {
+            "method": "hands closest to address height after the top",
+            "centre_frame": centre,
+            "height_error_shoulder_widths": round(best_error, 3),
+            "half_width_frames": half_width,
+            "note": (
+                "A region, not a frame — the clubhead is not tracked, so impact "
+                "cannot be localised to a single preview frame."
+            ),
+        }
+        return start, end, confidence, detail
+
+    def _detect_finish(
+        self,
+        path: np.ndarray,
+        usable: np.ndarray,
+        speed: np.ndarray,
+        impact_end: int,
+    ) -> Optional[Tuple[int, float]]:
+        """First frame of sustained quiet after impact — the held finish.
+
+        The mirror of address detection, and it uses the same threshold, so a
+        clip that settles the way it started is measured consistently at both
+        ends. A clip that stops while the golfer is still moving reports no
+        finish rather than treating the last frame as one.
+        """
+        finite = speed[np.isfinite(speed)]
+        if finite.size == 0:
+            return None
+        peak = float(np.max(finite))
+        if peak <= 1e-9:
+            return None
+        noise_floor = float(np.percentile(finite, 10))
+        threshold = max(
+            peak * QUIET_SPEED_FRACTION,
+            min(noise_floor * NOISE_FLOOR_MULTIPLE, peak * NOISE_CAP_FRACTION),
+        )
+
+        run = 0
+        run_start = None
+        for index in range(impact_end + 1, len(speed)):
+            if not np.isfinite(speed[index]):
+                continue
+            if speed[index] <= threshold:
+                if run == 0:
+                    run_start = index
+                run += 1
+                if run >= SUSTAINED_QUIET_FRAMES:
+                    quiet_after = int(
+                        np.count_nonzero(
+                            np.isfinite(speed[run_start:]) & (speed[run_start:] <= threshold)
+                        )
+                    )
+                    confidence = float(
+                        np.clip(0.4 + 0.6 * min(quiet_after / 8.0, 1.0), 0, 1)
+                    )
+                    return run_start, confidence
+            else:
+                run = 0
+                run_start = None
+        return None
 
     @staticmethod
     def _shoulder_width(sequence: PoseSequence, frame: int) -> float:

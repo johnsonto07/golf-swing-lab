@@ -28,7 +28,7 @@ from golf_lab.storage import (  # noqa: E402
 )
 from golf_lab.swing.geometry_detector import default_detector  # noqa: E402
 from golf_lab.swing.metric_registry import evaluate_all  # noqa: E402
-from golf_lab.swing.phases import PHASE_ORDER  # noqa: E402
+from golf_lab.swing.phases import PHASE_ORDER, SwingPhase, SwingPhases  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SWING_ANALYSIS = str(REPO_ROOT / "pages" / "2_Swing_Analysis.py")
@@ -127,18 +127,88 @@ class TestPhasesTabRenders:
         # Frame numbers must be labelled as preview frames, everywhere.
         assert "preview frame" in text.lower()
 
-    def test_unattempted_phases_are_listed_as_such(self, swing_with_phases):
-        # "Not attempted by this detector" and "attempted and failed" are
-        # different facts; collapsing them hides the one worth acting on.
+    def test_all_seven_phases_are_rendered(self, swing_with_phases):
         app = AppTest.from_file(SWING_ANALYSIS, default_timeout=120).run()
         text = _all_text(app)
-        assert "not attempted by this detector" in text.lower()
+        for phase in PHASE_ORDER:
+            assert phase.display_name in text, f"{phase.value} missing from the page"
+
+    def test_unattempted_phases_are_listed_as_such(
+        self, swing_with_phases, swing_root
+    ):
+        """A narrower detector must render as "not attempted", not as a gap.
+
+        The current detector attempts every phase, so this stores an analysis
+        from a hypothetical narrower one to exercise the branch. "Not attempted
+        by this detector" and "attempted and failed" are different facts, and
+        collapsing them hides the one worth acting on.
+        """
+        record, phases, metrics = swing_with_phases
+
+        narrowed = SwingPhases(
+            detector_name=phases.detector_name,
+            detector_version=phases.detector_version,
+            camera_view=phases.camera_view,
+            frame_count=phases.frame_count,
+            preview_fps=phases.preview_fps,
+        )
+        for phase in (SwingPhase.ADDRESS, SwingPhase.TOP_OF_BACKSWING):
+            narrowed.set(phases.get(phase))
+
+        stored = analysis_repository.load_analysis(record.swing_id, swing_root)
+        stored.phases = narrowed
+        analysis_repository.save_analysis(stored, swing_root)
+
+        app = AppTest.from_file(SWING_ANALYSIS, default_timeout=120).run()
+        assert "not attempted by this detector" in _all_text(app).lower()
 
     def test_detector_provenance_is_shown(self, swing_with_phases):
         app = AppTest.from_file(SWING_ANALYSIS, default_timeout=120).run()
         text = _all_text(app)
         assert "hand-path-geometry" in text
         assert "schema v" in text.lower()
+
+
+class TestRangePhaseRendering:
+    def test_range_phases_render_as_ranges(self, swing_with_phases):
+        # Collapsing the impact region to a single frame would present a span
+        # the camera cannot resolve as an instant.
+        _, phases, _ = swing_with_phases
+        app = AppTest.from_file(SWING_ANALYSIS, default_timeout=120).run()
+        text = _all_text(app)
+
+        impact = phases.get(SwingPhase.IMPACT_REGION)
+        if impact and impact.status.is_usable and impact.is_range:
+            assert f"{impact.start_frame}–{impact.end_frame}" in text
+            assert "frames**" in text or "frames)" in text
+
+    def test_impact_region_carries_its_caveat(self, swing_with_phases):
+        _, phases, _ = swing_with_phases
+        impact = phases.get(SwingPhase.IMPACT_REGION)
+        if not (impact and impact.status.is_usable):
+            pytest.skip("no impact region detected for this fixture")
+
+        app = AppTest.from_file(SWING_ANALYSIS, default_timeout=120).run()
+        text = _all_text(app).lower()
+        assert "region, not a frame" in text
+        assert "clubhead is not tracked" in text
+
+    def test_every_located_phase_offers_a_jump_button(self, swing_with_phases):
+        _, phases, _ = swing_with_phases
+        app = AppTest.from_file(SWING_ANALYSIS, default_timeout=120).run()
+        labels = [b.label for b in app.button]
+
+        for outcome in phases.available:
+            assert f"Jump to {outcome.phase.display_name}" in labels
+
+    def test_unavailable_phases_offer_no_jump_button(self, swing_with_phases):
+        _, phases, _ = swing_with_phases
+        app = AppTest.from_file(SWING_ANALYSIS, default_timeout=120).run()
+        labels = [b.label for b in app.button]
+
+        for outcome in phases.attempted:
+            if not outcome.status.is_usable:
+                assert f"Jump to {outcome.phase.display_name}" not in labels
 
 
 class TestTimingHonesty:
