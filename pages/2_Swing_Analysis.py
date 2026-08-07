@@ -62,6 +62,7 @@ from golf_lab.swing import metric_registry  # noqa: E402
 from golf_lab.swing.geometry_detector import default_detector  # noqa: E402
 from golf_lab.swing.phases import PHASE_ORDER, SwingPhase  # noqa: E402
 from golf_lab.swing.results import ResultStatus  # noqa: E402
+from golf_lab.swing.source_timing import all_source_timings  # noqa: E402
 from golf_lab.ui import (  # noqa: E402
     FRAME_INDEX_KEY,
     load_timeline,
@@ -715,12 +716,36 @@ with phases_tab:
         f"(schema v{stored.schema_version})."
     )
 
-    st.divider()
-    st.info(
-        "**Not offered yet:** tempo ratios and phase durations in seconds. "
-        "Both need real source timing, which is blocked by GSL-1 "
-        "(docs/KNOWN_ISSUES.md). Phase positions above are preview frame "
-        "numbers, and preview timestamps are labelled as such."
+    st.markdown("##### Source-time timing")
+    if _timeline is None:
+        st.caption(
+            "Timing has not been measured for this swing, so durations and "
+            "tempo are refused rather than estimated. Re-import to measure."
+        )
+    else:
+        st.caption(
+            f"Timing basis: **{_timeline.confidence.label}** · frame spacing "
+            f"**{_timeline.rate_classification.label}** · measured "
+            f"{_timeline.measured_fps:.3f} fps over {_timeline.frame_count} "
+            "decoded frames."
+        )
+
+    for timing in all_source_timings(stored.phases, _timeline):
+        left, right = st.columns([3, 2])
+        left.markdown(f"{timing.icon} **{timing.display_name}**")
+        right.markdown(
+            f"**{timing.display_value(2)}**"
+            if timing.status.is_usable
+            else f"_{timing.label}_"
+        )
+        if timing.reason:
+            st.caption(timing.reason)
+
+    st.caption(
+        "Durations and tempo are computed from measured presentation "
+        "timestamps, not from a nominal frame rate. Phase positions above "
+        "remain preview frame indices; both are shown so neither is mistaken "
+        "for the other."
     )
 
 st.divider()
