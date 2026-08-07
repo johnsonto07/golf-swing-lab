@@ -80,6 +80,76 @@ def swing_selector(label: str = "Swing") -> Optional[SwingRecord]:
     return next(r for r in records if r.swing_id == chosen_id)
 
 
+@st.cache_resource(show_spinner=False)
+def load_timeline(swing_id: str, fingerprint: str):
+    """Measured timeline for a swing, cached per media fingerprint."""
+    from golf_lab.storage import timeline_repository
+
+    return timeline_repository.load_timeline(swing_id)
+
+
+def timing_notices(record: SwingRecord, timeline) -> list[tuple[str, str]]:
+    """Warnings to show for a swing's timing, as ``(level, message)`` pairs.
+
+    Two things that used to be conflated are now reported separately, because
+    conflating them produced a false alarm: **inconsistent container metadata**
+    is a property of the file's headers, while **variable frame rate** is a
+    property of the decoded frames. The clip that prompted this has the first
+    and not the second — 438 frames decode at a constant 25.000 fps while its
+    container advertises 484 at 22.873.
+    """
+    from golf_lab.video.timeline import RateClassification, TimelineConfidence
+
+    notices: list[tuple[str, str]] = []
+
+    if timeline is None:
+        notices.append((
+            "warning",
+            "**Frame timing has not been measured for this swing.** It was "
+            "imported before timings were measured, or the measurement failed. "
+            "Frame stepping and the pose overlay work normally, but durations "
+            "and tempo are refused rather than estimated. Re-import to measure.",
+        ))
+        return notices
+
+    if timeline.rate_classification is RateClassification.VARIABLE:
+        notices.append((
+            "warning",
+            f"**This clip is genuinely variable frame rate.** Measured from its "
+            f"own frame timestamps: {timeline.frame_count} frames spanning "
+            f"{timeline.duration_seconds:.2f}s, with spacing that varies beyond "
+            "tolerance. Timestamps shown are measured, so durations remain "
+            "trustworthy — but frames are not evenly spaced in time.",
+        ))
+    elif timeline.confidence is TimelineConfidence.NOMINAL:
+        notices.append((
+            "warning",
+            "**No frame timestamps could be read from this video.** Timing falls "
+            "back to a nominal frame rate, so durations and tempo are refused "
+            "rather than estimated from an assumption.",
+        ))
+    elif timeline.confidence is TimelineConfidence.DEGRADED:
+        notices.append((
+            "info",
+            "Some frames in this video had no readable timestamp and were "
+            "interpolated between their neighbours. Durations are available but "
+            "reported as low confidence.",
+        ))
+
+    # Reported as what it is: bad headers, not a bad video.
+    if timeline.container_metadata_is_inconsistent:
+        notices.append((
+            "info",
+            f"This file's container metadata is inconsistent — it claims "
+            f"{timeline.container_frame_count} frames, but "
+            f"{timeline.frame_count} actually decode. The measured values are "
+            "used throughout. This does **not** mean the video is variable "
+            "frame rate; its measured spacing is "
+            f"**{timeline.rate_classification.label}**.",
+        ))
+    return notices
+
+
 def coming_soon(milestone: str, bullets: list[str]) -> None:
     """Consistent placeholder for pages whose milestone isn't built yet."""
     st.info(

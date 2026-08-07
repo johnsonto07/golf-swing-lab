@@ -62,7 +62,13 @@ from golf_lab.swing import metric_registry  # noqa: E402
 from golf_lab.swing.geometry_detector import default_detector  # noqa: E402
 from golf_lab.swing.phases import PHASE_ORDER, SwingPhase  # noqa: E402
 from golf_lab.swing.results import ResultStatus  # noqa: E402
-from golf_lab.ui import FRAME_INDEX_KEY, page_setup, swing_selector  # noqa: E402
+from golf_lab.ui import (  # noqa: E402
+    FRAME_INDEX_KEY,
+    load_timeline,
+    page_setup,
+    swing_selector,
+    timing_notices,
+)
 from golf_lab.video.frame_reader import (  # noqa: E402
     FrameReader,
     FrameReadError,
@@ -79,9 +85,14 @@ MODEL_CHOICE_KEY = "pose_model_choice"
 
 
 @st.cache_resource(show_spinner=False)
-def _open_reader(video_path: str, size: int, mtime: int) -> FrameReader:
-    """Cached reader, keyed on file identity so a replaced file invalidates."""
-    return FrameReader(Path(video_path))
+def _open_reader(
+    video_path: str, size: int, mtime: int, swing_id: str = ""
+) -> FrameReader:
+    """Cached reader carrying the measured timeline, keyed on file identity."""
+    from golf_lab.storage import timeline_repository
+
+    timeline = timeline_repository.load_timeline(swing_id) if swing_id else None
+    return FrameReader(Path(video_path), timeline=timeline)
 
 
 @st.cache_resource(show_spinner=False)
@@ -115,15 +126,9 @@ if record is None:
 st.subheader(record.original_filename)
 st.caption(f"swing id `{record.swing_id}`")
 
-if record.timeline_is_approximate:
-    st.warning(
-        "**Variable frame rate — frame numbers here are preview frame numbers.**\n\n"
-        "Pose runs on the preview, whose timeline was resampled to a constant "
-        "frame rate. The overlay and joint positions are unaffected, but frame "
-        "indices and timestamps do not map exactly back to your original file, "
-        "so tempo and phase-duration work is not reliable for this clip. "
-        "Tracked as GSL-1 in docs/KNOWN_ISSUES.md."
-    )
+_timeline = load_timeline(record.swing_id, record.preview_relpath or "")
+for _level, _message in timing_notices(record, _timeline):
+    (st.warning if _level == "warning" else st.info)(_message)
 
 try:
     video_path = swing_repository.preview_or_original_path(record)
@@ -399,7 +404,9 @@ with viewer_tab:
 
     try:
         stat = video_path.stat()
-        reader = _open_reader(str(video_path), stat.st_size, int(stat.st_mtime))
+        reader = _open_reader(
+            str(video_path), stat.st_size, int(stat.st_mtime), record.swing_id
+        )
     except FrameReadError as exc:
         st.error(str(exc))
         st.stop()
@@ -591,7 +598,7 @@ with phases_tab:
             phases = detector.detect(
                 sequence,
                 record.context.camera_view,
-                timeline_is_approximate=record.timeline_is_approximate,
+                timeline_is_approximate=record.container_metadata_is_inconsistent,
             )
             phase_frames = {
                 phase.value: frame

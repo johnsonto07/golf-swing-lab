@@ -50,49 +50,49 @@ def _record(video: VideoMetadata, preview: VideoMetadata | None) -> SwingRecord:
 class TestVariableFrameRateDetection:
     def test_detects_the_real_failing_clip(self):
         # The actual numbers from the clip that exposed this.
-        assert _metadata().is_variable_frame_rate
+        assert _metadata().container_rates_disagree
 
     def test_constant_frame_rate_is_not_flagged(self):
         meta = _metadata(avg_frame_rate=30.0, r_frame_rate=30.0, fps=30.0)
-        assert not meta.is_variable_frame_rate
+        assert not meta.container_rates_disagree
 
     def test_ntsc_rates_are_not_flagged(self):
         # 60 vs 59.94 differ by 0.1% and are perfectly constant. A tighter
         # tolerance here would flag most ordinary footage as VFR.
         meta = _metadata(avg_frame_rate=59.94, r_frame_rate=60.0, fps=59.94)
-        assert not meta.is_variable_frame_rate
+        assert not meta.container_rates_disagree
 
     def test_missing_rates_are_not_flagged(self):
         # OpenCV fallback cannot supply these; absence must not be read as VFR.
         meta = _metadata(avg_frame_rate=None, r_frame_rate=None)
-        assert not meta.is_variable_frame_rate
+        assert not meta.container_rates_disagree
 
     def test_zero_rates_do_not_divide_by_zero(self):
         meta = _metadata(avg_frame_rate=0.0, r_frame_rate=0.0)
-        assert not meta.is_variable_frame_rate
+        assert not meta.container_rates_disagree
 
 
 class TestTimelineIsApproximate:
     def test_vfr_source_makes_the_timeline_approximate(self):
         record = _record(_metadata(), _metadata(fps=25.0, frame_count=438))
-        assert record.timeline_is_approximate
+        assert record.container_metadata_is_inconsistent
 
     def test_frame_count_mismatch_alone_is_enough(self):
         # Even if the rates look constant, losing frames in the proxy means
         # preview index no longer equals source index.
         cfr = _metadata(avg_frame_rate=30.0, r_frame_rate=30.0, fps=30.0)
         preview = _metadata(avg_frame_rate=30.0, r_frame_rate=30.0, fps=30.0, frame_count=400)
-        assert _record(cfr, preview).timeline_is_approximate
+        assert _record(cfr, preview).container_metadata_is_inconsistent
 
     def test_clean_cfr_clip_is_exact(self):
         cfr = _metadata(avg_frame_rate=30.0, r_frame_rate=30.0, fps=30.0, frame_count=300)
         preview = _metadata(avg_frame_rate=30.0, r_frame_rate=30.0, fps=30.0, frame_count=300)
-        assert not _record(cfr, preview).timeline_is_approximate
+        assert not _record(cfr, preview).container_metadata_is_inconsistent
 
     def test_off_by_one_is_tolerated(self):
         cfr = _metadata(avg_frame_rate=30.0, r_frame_rate=30.0, fps=30.0, frame_count=300)
         preview = _metadata(avg_frame_rate=30.0, r_frame_rate=30.0, fps=30.0, frame_count=301)
-        assert not _record(cfr, preview).timeline_is_approximate
+        assert not _record(cfr, preview).container_metadata_is_inconsistent
 
 
 class TestPreviewAccessors:
@@ -109,7 +109,7 @@ class TestPreviewAccessors:
         record = _record(_metadata(), None)
         assert record.preview_frame_count == 484
         assert record.preview_fps == pytest.approx(22.873)
-        assert not record.timeline_is_approximate or record.video.is_variable_frame_rate
+        assert not record.container_metadata_is_inconsistent or record.video.container_rates_disagree
 
 
 class TestBackwardCompatibility:
@@ -121,7 +121,7 @@ class TestBackwardCompatibility:
 
         restored = SwingRecord.model_validate(payload)
         assert restored.preview_video is None
-        assert not restored.video.is_variable_frame_rate
+        assert not restored.video.container_rates_disagree
         assert restored.preview_frame_count == 484
 
     def test_round_trip_preserves_preview_metadata(self):
@@ -129,7 +129,7 @@ class TestBackwardCompatibility:
         restored = SwingRecord.model_validate(record.model_dump(mode="json"))
         assert restored.preview_video is not None
         assert restored.preview_video.frame_count == 438
-        assert restored.timeline_is_approximate
+        assert restored.container_metadata_is_inconsistent
 
 
 class TestImportRecordsBothTimelines:
@@ -148,7 +148,7 @@ class TestImportRecordsBothTimelines:
         assert record.preview_video.frame_count > 0
         # The synthetic fixture is constant-frame-rate, so the two timelines
         # must agree and nothing should be flagged.
-        assert not record.timeline_is_approximate
+        assert not record.container_metadata_is_inconsistent
         assert record.preview_frame_count == record.video.frame_count
 
     def test_probe_populates_both_frame_rates(self, fixture_video):
@@ -157,4 +157,4 @@ class TestImportRecordsBothTimelines:
         meta = extract_metadata(fixture_video)
         assert meta.avg_frame_rate and meta.avg_frame_rate > 0
         assert meta.r_frame_rate and meta.r_frame_rate > 0
-        assert not meta.is_variable_frame_rate
+        assert not meta.container_rates_disagree

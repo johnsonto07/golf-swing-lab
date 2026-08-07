@@ -48,6 +48,11 @@ logger = get_logger(__name__)
 # Bump when the stored layout changes in a way older code would misread.
 TIMELINE_SCHEMA_VERSION = 1
 
+# Identifies *how* timestamps were obtained. Stored per timeline so a change of
+# extraction strategy invalidates old artifacts without a schema bump.
+EXTRACTOR_NAME = "ffprobe/best_effort_timestamp_time"
+EXTRACTOR_VERSION = "1"
+
 # Frame gaps within this fraction of each other count as constant rate. Real
 # CFR files show tiny rounding wobble in their timestamps (a 1/30 s gap stored
 # in a 1/15000 timebase is not exactly 0.0333), so an exact-equality test would
@@ -71,27 +76,72 @@ class TimingMethod(str, Enum):
 
 
 class TimelineConfidence(str, Enum):
-    """Whether the timeline as a whole can support timing claims."""
+    """How much of this timeline's timing can be trusted.
+
+    These are the timing *trust states*. Every timing-dependent metric states
+    which one it rests on, so a duration is never presented without the basis
+    that produced it.
+    """
 
     MEASURED = "measured"
     """Every frame timestamp came from the media. Durations are trustworthy."""
 
     DEGRADED = "degraded"
-    """Some timestamps were interpolated. Usable, with the caveat surfaced."""
+    """Partially interpolated: some frames had no readable timestamp and were
+    estimated between known neighbours. Durations are permitted but reported as
+    low confidence, because the interpolation policy — linear between the
+    nearest measured frames either side — is documented and bounded."""
 
     NOMINAL = "nominal"
-    """No usable timestamps were recovered; everything is derived from a
-    nominal rate. Source-time durations are refused entirely."""
+    """Nominal only. No usable timestamps were recovered; everything derives
+    from a nominal rate. Durations and tempo are refused entirely."""
+
+    UNAVAILABLE = "unavailable"
+    """No timing at all: the file could not be probed, or holds no frames.
+    Distinguished from NOMINAL because there is not even a rate to fall back
+    on, and the remedy differs — re-import rather than re-record."""
 
     @property
     def supports_durations(self) -> bool:
         """Whether a duration in seconds may be computed from this timeline.
 
-        NOMINAL is excluded on purpose. A duration computed from a nominal
-        rate on a file whose rate is unknown is exactly the fabricated number
-        this module exists to prevent.
+        NOMINAL and UNAVAILABLE are excluded on purpose. A duration computed
+        from a nominal rate on a file whose real rate is unknown is exactly the
+        fabricated number this module exists to prevent.
         """
         return self in (TimelineConfidence.MEASURED, TimelineConfidence.DEGRADED)
+
+    @property
+    def label(self) -> str:
+        return {
+            TimelineConfidence.MEASURED: "measured",
+            TimelineConfidence.DEGRADED: "partially interpolated",
+            TimelineConfidence.NOMINAL: "nominal only",
+            TimelineConfidence.UNAVAILABLE: "unavailable",
+        }[self]
+
+
+class RateClassification(str, Enum):
+    """What the *decoded* frames say about frame spacing.
+
+    Deliberately decided from measured timestamps alone. Container metadata is
+    not consulted: a file whose ``nb_frames`` disagrees with reality, or whose
+    nominal and average rates contradict each other, is not thereby variable
+    frame rate — it just has bad metadata, which is a separate thing to report.
+    """
+
+    CONSTANT = "constant"
+    VARIABLE = "variable"
+    UNVERIFIED = "unverified"
+    """Only nominal timing was available, so spacing could not be checked."""
+
+    @property
+    def label(self) -> str:
+        return {
+            RateClassification.CONSTANT: "constant rate",
+            RateClassification.VARIABLE: "variable rate",
+            RateClassification.UNVERIFIED: "timing unverified",
+        }[self]
 
 
 class TimelineError(RuntimeError):
@@ -128,6 +178,38 @@ class SourceTimeline:
     schema_version: int = TIMELINE_SCHEMA_VERSION
     source_name: str = ""
     notes: List[str] = field(default_factory=list)
+
+    extractor: str = EXTRACTOR_NAME
+    extractor_version: str = EXTRACTOR_VERSION
+    # Fingerprints of the media this was measured from, for staleness checks.
+    source_fingerprint: str = ""
+    preview_fingerprint: str = ""
+    # Frame count the container claimed, kept only so the UI can point out a
+    # disagreement. It is never used as the frame count.
+    container_frame_count: Optional[int] = None
+
+    @property
+    def rate_classification(self) -> RateClassification:
+        """Constant / variable / unverified, decided from measured spacing."""
+        if not self.confidence.supports_durations:
+            return RateClassification.UNVERIFIED
+        return (
+            RateClassification.CONSTANT
+            if self.is_constant_rate
+            else RateClassification.VARIABLE
+        )
+
+    @property
+    def container_metadata_is_inconsistent(self) -> bool:
+        """Whether the container's own numbers disagree with the decoded stream.
+
+        Worth surfacing — it is why this module exists — but it says nothing
+        about whether the decoded video is variable frame rate. Reporting the
+        two separately is the whole correction.
+        """
+        if self.container_frame_count is None or not self.frames:
+            return False
+        return abs(self.container_frame_count - len(self.frames)) > 1
 
     # -- basics ----------------------------------------------------------
     def __len__(self) -> int:
@@ -210,11 +292,19 @@ class SourceTimeline:
         cost several megabytes of punctuation."""
         return {
             "schema_version": self.schema_version,
+            "extractor": self.extractor,
+            "extractor_version": self.extractor_version,
             "confidence": self.confidence.value,
+            "rate_classification": self.rate_classification.value,
             "nominal_fps": self.nominal_fps,
             "measured_fps": self.measured_fps,
             "is_constant_rate": self.is_constant_rate,
+            "cfr_tolerance": CFR_TOLERANCE,
             "source_name": self.source_name,
+            "source_fingerprint": self.source_fingerprint,
+            "preview_fingerprint": self.preview_fingerprint,
+            "container_frame_count": self.container_frame_count,
+            "measured_duration_seconds": self.duration_seconds,
             "notes": list(self.notes),
             "frame_count": len(self.frames),
             "source_seconds": [round(f.source_seconds, 6) for f in self.frames],
@@ -259,6 +349,11 @@ class SourceTimeline:
             schema_version=version,
             source_name=str(data.get("source_name", "")),
             notes=list(data.get("notes") or []),
+            extractor=str(data.get("extractor", EXTRACTOR_NAME)),
+            extractor_version=str(data.get("extractor_version", EXTRACTOR_VERSION)),
+            source_fingerprint=str(data.get("source_fingerprint", "")),
+            preview_fingerprint=str(data.get("preview_fingerprint", "")),
+            container_frame_count=data.get("container_frame_count"),
         )
 
 
@@ -443,12 +538,18 @@ def _measure_rate(frames: Sequence[FrameTiming]) -> Tuple[Optional[float], bool]
 
 
 def build_timeline(
-    video_path: Path, nominal_fps: float = 0.0
+    video_path: Path,
+    nominal_fps: float = 0.0,
+    container_frame_count: Optional[int] = None,
+    source_fingerprint: str = "",
+    preview_fingerprint: str = "",
 ) -> SourceTimeline:
     """Measure a video's real timing and return the mapping.
 
     ``nominal_fps`` is used only as a fallback for frames with no readable
     timestamp, and its use is always recorded in the frame's ``method``.
+    ``container_frame_count`` is stored purely so a disagreement with the
+    decoded stream can be reported; it is never used as the frame count.
     """
     video_path = Path(video_path)
     raw = probe_frame_timestamps(video_path)
@@ -469,6 +570,9 @@ def build_timeline(
         is_constant_rate=constant,
         source_name=video_path.name,
         notes=notes,
+        source_fingerprint=source_fingerprint,
+        preview_fingerprint=preview_fingerprint,
+        container_frame_count=container_frame_count,
     )
 
     if measured_fps and nominal_fps > 0:
@@ -479,6 +583,14 @@ def build_timeline(
                 f"timestamps measure {measured_fps:.3f} fps. The measured rate "
                 "is used; the container's figure is unreliable for this file."
             )
+
+    if timeline.container_metadata_is_inconsistent:
+        timeline.notes.append(
+            f"The container claims {container_frame_count} frames but "
+            f"{len(frames)} actually decode. The decoded count is used. This is "
+            "inconsistent container metadata, not variable frame rate — the "
+            "frame spacing is judged separately, from the timestamps."
+        )
 
     logger.info(
         "Timeline for %s: %d frames, %s, measured %.3f fps, constant=%s",
