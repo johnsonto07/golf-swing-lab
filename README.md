@@ -34,8 +34,7 @@ trustworthy, the app says so instead of showing a number:
 | | |
 |---|---|
 | **[v0.2.0](https://github.com/johnsonto07/golf-swing-lab/releases/tag/v0.2.0)** | Milestone 2 — video import, preview normalization, pose model management, inference, smoothing, overlay, per-swing storage. |
-| **`main` (unreleased)** | Everything in v0.2.0 **plus** the first Milestone 3 slice: address and top-of-backswing detection, camera-view metric gating, and the Phases tab. |
-| **`milestone-3-phases`** | Adds the remaining five phases — takeaway, downswing, impact region, follow-through, finish. Merges into `main` once push-triggered CI is confirmed green. |
+| **`main` (unreleased)** | Everything in v0.2.0 **plus** Milestone 3 so far: the complete seven-phase preview-frame detector, camera-view metric gating, and the Phases tab. |
 
 The tag is immutable and describes Milestone 2 only. If you want exactly what
 was released, check out `v0.2.0`; if you want the phase work, use `main`.
@@ -423,7 +422,7 @@ must be resolved before Milestone 3 tempo work or Milestone 5 export.
 | 1 | Video Lab — import, frame stepping, export | ✅ done |
 | 2 | Pose overlay — model management, inference, smoothing, storage | ✅ done |
 | 1b | Recording-quality assessment | ⬜ planned |
-| 3 | Swing phases and qualitative metrics | 🔜 in progress |
+| 3 | Swing phases and qualitative metrics | 🔜 in progress — seven-phase detector done |
 | 4 | Reference comparison | ⬜ planned |
 | 5 | Manual ball tracer | ⬜ planned |
 | 6 | Assisted tracking | ⬜ planned |

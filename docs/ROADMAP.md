@@ -132,21 +132,39 @@ and useless for ball tracking:
   MediaPipe
 - 412 tests
 
+### ✅ Phase detection is complete — on the preview timeline
+
+**The seven-phase preview-frame detector is implemented.** All of address,
+takeaway, top of backswing, downswing, impact region, follow-through and finish
+are located, each with an explicit confidence and status, and each expressed as
+a **preview-frame index or frame range**.
+
+That qualifier is the whole point, and it is not a formality. Every phase
+position above is a position on the *preview* timeline. Converting one to a
+time in the original file requires a per-frame preview→source mapping that does
+not exist yet, so the following stay blocked no matter how good phase detection
+becomes:
+
+| 🚧 Blocked on [issue #1 / GSL-1](https://github.com/johnsonto07/golf-swing-lab/issues/1) | Why |
+|---|---|
+| Phase durations in seconds (source time) | measured on a resampled timeline |
+| Tempo ratios (backswing : downswing) | a ratio of two such durations |
+| Frame-perfect source comparison | preview frame N ≠ original frame N |
+| Timing-sensitive ball-tracer export | renders onto the original, needs the true source frame |
+
+Preview-frame indices and clearly labelled *preview* timestamps are shown.
+Nothing in the phase container exposes a duration or ratio field, and a test
+asserts their absence — the cheapest way to keep a wrong number out is to make
+it impossible to ask for.
+
 ### ⬜ Remaining in Milestone 3
 
 - Manual phase correction that outranks the automatic suggestion
 - Implement the declared-but-not-yet-computed metrics (lead-arm angle,
   hip line, hip depth, posture change, shoulder line)
-- Audio-assisted impact suggestion
+- Audio-assisted impact suggestion; manual correction always wins
 - Qualitative classifications with low/medium/high confidence
 - 🚧 Tempo and phase durations in seconds — **blocked on GSL-1**
-
-- Manual marking of P1–P9; automatic suggestions for address, top, impact, finish
-- Audio-assisted impact suggestion; manual correction always wins
-- Tempo (backswing/downswing ratio), head movement, hip sway/depth,
-  hand height and depth
-- Camera-view-gated metrics
-- Qualitative classifications with low/medium/high confidence
 
 ## ⬜ Milestone 4 — Reference comparison
 
