@@ -2,21 +2,27 @@
 
 Status legend: ✅ done · 🔜 next · ⬜ planned · 🚧 blocked
 
-## Blocked by [issue #1](https://github.com/johnsonto07/golf-swing-lab/issues/1) (GSL-1)
+## Timing foundation — resolved
 
-Preview frames do not map back to source frames on variable-frame-rate video.
-Until a verified per-frame mapping exists, these specific features cannot be
-built correctly, regardless of which milestone they sit in:
+[Issue #1](https://github.com/johnsonto07/golf-swing-lab/issues/1) was filed as
+"preview frames do not map back to source frames on VFR video". **Measurement
+showed that diagnosis was wrong**: the clip behind it decodes 438 frames at a
+constant 25.000 fps while its container claims 484 at 22.873, and the preview
+pipeline preserves frame count and timestamps exactly (0.00000 s drift on a
+genuinely variable-rate fixture).
 
-| 🚧 Blocked | Milestone |
+Timing is now taken from measured presentation timestamps, so the features that
+were blocked on it are unblocked:
+
+| Previously blocked | Now |
 |---|---|
-| Reliable tempo ratios | 3 |
-| Reliable phase durations in seconds | 3 |
-| Frame-perfect source comparison | 3 / 4 |
-| Timing-sensitive ball-tracer export | 5 |
+| Tempo ratios | ✅ computed from measured timestamps |
+| Phase durations in seconds | ✅ computed from measured timestamps |
+| Frame-perfect source comparison | ✅ preview frame N is source frame N, verified |
+| Timing-sensitive tracer export | foundation ready; export itself is Milestone 5 |
 
-Everything else in those milestones — phase *marking*, geometry metrics,
-normalization, overlay work — is unaffected and can proceed.
+Media whose timestamps cannot be read at all still refuses durations and tempo.
+That is a limit of the input, not a defect.
 
 ## ✅ Milestone 0 — Environment and architecture
 
@@ -51,13 +57,10 @@ normalization, overlay work — is unaffected and can proceed.
 Verified end to end on real 4K HEVC phone footage: 438/438 frames detected,
 0.86 mean confidence. 272 local tests, CI green on Python 3.10–3.12.
 
-The variable-frame-rate timeline problem found during that verification is
-**not** unfinished Milestone 2 work — pose estimation, smoothing, the overlay,
-and storage are all complete and correct. It is a separate, pre-existing
-limitation of the preview proxy, tracked as
-[GSL-1 / issue #1](https://github.com/johnsonto07/golf-swing-lab/issues/1),
-and it gates specific *future* features (listed against Milestones 3 and 5)
-rather than anything delivered here.
+The "variable frame rate" problem reported during that verification turned out
+to be inconsistent container metadata rather than a property of the video or a
+fault in the preview — see the timing foundation section above. Pose
+estimation, smoothing, the overlay and storage were correct throughout.
 
 - MediaPipe Pose Landmarker model management with three selectable models
   (lite/full/heavy), recorded source, licence, version, size, and SHA-256
@@ -94,12 +97,6 @@ and useless for ball tracking:
 
 ## 🔜 Milestone 3 — Swing phases and qualitative metrics
 
-> **Blocked on [GSL-1](KNOWN_ISSUES.md#gsl-1)** for tempo and phase durations.
-> Preview frames do not map back to source frames on variable-frame-rate video,
-> so any duration measured today is computed on a resampled timeline. Phase
-> *marking* can proceed; anything expressed in seconds or as a ratio must wait
-> for a verified per-frame preview→source mapping.
-
 ### ✅ First vertical slice (delivered)
 
 - `golf_lab/swing/` package: result statuses, phase types, detector protocol,
@@ -132,30 +129,19 @@ and useless for ball tracking:
   MediaPipe
 - 412 tests
 
-### ✅ Phase detection is complete — on the preview timeline
+### ✅ Phase detection complete, with measured source timing
 
-**The seven-phase preview-frame detector is implemented.** All of address,
-takeaway, top of backswing, downswing, impact region, follow-through and finish
-are located, each with an explicit confidence and status, and each expressed as
-a **preview-frame index or frame range**.
+All seven phases — address, takeaway, top of backswing, downswing, impact
+region, follow-through, finish — are located with an explicit confidence and
+status, as preview-frame indices or ranges.
 
-That qualifier is the whole point, and it is not a formality. Every phase
-position above is a position on the *preview* timeline. Converting one to a
-time in the original file requires a per-frame preview→source mapping that does
-not exist yet, so the following stay blocked no matter how good phase detection
-becomes:
+**Durations and tempo are now available**, computed from measured presentation
+timestamps rather than preview frame arithmetic. Each states its timing basis,
+and media whose timestamps cannot be read refuses them outright rather than
+estimating from a nominal rate.
 
-| 🚧 Blocked on [issue #1 / GSL-1](https://github.com/johnsonto07/golf-swing-lab/issues/1) | Why |
-|---|---|
-| Phase durations in seconds (source time) | measured on a resampled timeline |
-| Tempo ratios (backswing : downswing) | a ratio of two such durations |
-| Frame-perfect source comparison | preview frame N ≠ original frame N |
-| Timing-sensitive ball-tracer export | renders onto the original, needs the true source frame |
-
-Preview-frame indices and clearly labelled *preview* timestamps are shown.
-Nothing in the phase container exposes a duration or ratio field, and a test
-asserts their absence — the cheapest way to keep a wrong number out is to make
-it impossible to ask for.
+Preview frame indices remain visible beside the measured timestamps, so neither
+is mistaken for the other.
 
 ### ⬜ Remaining in Milestone 3
 
@@ -164,7 +150,6 @@ it impossible to ask for.
   hip line, hip depth, posture change, shoulder line)
 - Audio-assisted impact suggestion; manual correction always wins
 - Qualitative classifications with low/medium/high confidence
-- 🚧 Tempo and phase durations in seconds — **blocked on GSL-1**
 
 ## ⬜ Milestone 4 — Reference comparison
 
@@ -177,10 +162,10 @@ it impossible to ask for.
 
 ## ⬜ Milestone 5 — Manual ball tracer
 
-> **Blocked on [GSL-1](KNOWN_ISSUES.md#gsl-1)** for the final render. Export
-> draws onto the *original* at full quality, which requires knowing the source
-> frame for each traced preview frame. On variable-frame-rate clips that
-> mapping does not currently exist.
+> The timing foundation this needs is in place: preview frame N is source
+> frame N for the current pipeline, verified by measurement, and every frame
+> carries a measured timestamp. Export still has to respect rotation, aspect
+> ratio and audio, which is Milestone 5 work.
 
 - Impact confirmation, click-to-place ball, additional visible points
 - Shot-shape and height presets seeding an editable spline

@@ -23,7 +23,7 @@ motion-capture system, and not a substitute for a coach who can see you swing.
   not measured and will never be inferred. Any statement about ball flight
   causes is therefore hedged.
 
-## Limits in the current version (Milestone 2)
+## Limits in the current version
 
 - Pose estimation and the skeleton overlay work; phase detection, comparison,
   tracer, coaching, and rendering do not exist yet.
@@ -31,111 +31,70 @@ motion-capture system, and not a substitute for a coach who can see you swing.
   not yet warn you that footage is unsuitable for a given analysis type.
 - History shows imported swings but no trends.
 - Swing deletion is intentionally not in the UI; remove folders yourself.
-- **Variable-frame-rate clips have an approximate timeline** — see the section
-  immediately below. This is the most consequential limitation in the build.
+- **Timing is measured, not assumed** — see the section below on what is
+  measured and what is refused.
 
-## Variable frame rate: what is and is not reliable
+## Frame timing: what is measured and what is assumed
 
-Everything interactive — scrubbing, pose, the overlay — reads the generated
-`preview.mp4`, never the original. For **constant-frame-rate** footage the two
-are frame-for-frame equivalent and this section does not apply.
+Timing comes from the video's **own presentation timestamps**, extracted once at
+import and stored in `timeline.json`. Container metadata is not trusted for it.
 
-For **variable-frame-rate** footage (many phone "auto" modes, slow-motion
-clips, most screen recordings) it does. FFmpeg cannot put unevenly spaced
-frames into a browser-playable proxy without resampling them to a constant
-rate. A real test clip went from 484 source frames at 22.87 fps average to 438
-preview frames at a constant 25 fps.
+That distinction is not pedantry — it was a bug. A real phone clip advertised
+484 frames at 22.873 fps; it actually decodes **438 frames at a constant 25.000
+fps**. `nb_frames` was wrong and `avg_frame_rate`, being frames ÷ duration,
+inherited the error. The clip was wrongly flagged variable-frame-rate and its
+timestamps were ~9% out. Both problems came from believing the header instead
+of the frames.
 
-The app detects this, marks the swing `needs_review`, and shows a warning on
-both the Video Lab and Swing Analysis pages.
+### Five things that are often conflated
 
-**Still reliable on these clips:**
-
-- the pose overlay and every landmark position
-- per-joint and per-frame confidence
-- what the swing looks like at a given preview frame
-- saved frames and overlay exports
-
-**Not yet reliable on these clips:**
-
-- **Tempo** (backswing:downswing ratio) — derived from durations that are
-  measured on a resampled timeline
-- **Phase durations** — how long P1→P4 or P4→P7 actually took
-- **Frame-perfect comparison against the source** — preview frame N is not
-  original frame N, and the offset varies through the clip
-- **Any timestamp read as a time in your original file** — the displayed time
-  is preview time, which drifted about 9% by the end of the test clip
-
-None of these features are implemented yet, so the app is not currently showing
-you a wrong number. The restriction exists so that they are not built on a
-foundation that would make them wrong. Resolving it is a prerequisite for
-Milestone 3 tempo work and Milestone 5 export — tracked as **GSL-1** in
-[KNOWN_ISSUES.md](KNOWN_ISSUES.md).
-
-If you need trustworthy tempo today, record in a mode that produces constant
-frame rate, and check `Variable frame rate: no` in the Video Lab's Original
-file panel.
-
-## Swing phases and metrics (Milestone 3)
-
-All seven phases are detected — address, takeaway, top of backswing, downswing,
-impact region, follow-through, finish — all from the hand path, which is the one
-signal a single camera reads reliably from either angle.
-
-**Impact is a region, not a frame, and this will not change.** The clubhead is
-not tracked, so the hands only show roughly when the club came back through the
-ball, and at 30 fps the clubhead crosses the ball in well under one frame
-interval. A single "impact frame" would be a precision this input cannot
-support. The region narrows in real time at higher frame rates, but it stays a
-region.
-
-**Known limitation: a backswing-only clip finds no top.** The top is located as
-the highest hands *between address and peak hand speed* — that bound is what
-stops the finish, where the hands are usually just as high, from being mistaken
-for the top. On a clip that ends at the top, peak speed falls inside the
-backswing and the bound collapses. The detector reports no top and blocks the
-dependent phases rather than guessing. Record through the finish.
-
-**Range phases can start or end on a frame with no pose.** Their endpoints are
-boundaries derived from the neighbouring phases, not observations. Point phases
-— address, takeaway, top, finish — are always on frames where a pose was
-actually seen.
-
-**Metrics depend on the camera view, and this is enforced.** A metric declares
-which views it supports and is refused on the others before any arithmetic
-runs. Lateral hip sway measured down-the-line would be a number describing
-mostly camera-axis motion — not wrong so much as meaningless, and meaningless
-numbers look like evidence.
-
-Currently computed:
-
-| Face-on | Down-the-line |
+| | What it means |
 |---|---|
-| Head sway, hip sway, shoulder tilt | Head movement, spine angle |
+| **Container metadata** | The file's headers. Frequently wrong. Never used for timing. |
+| **Decoded frame count** | Frames that actually decode. The source of truth. |
+| **Presentation timestamps** | When each frame is shown. The basis for all durations. |
+| **Measured constant-rate** | Gaps between timestamps agree within 2%. |
+| **Genuine variable-rate** | Gaps really do vary. Durations still trustworthy — they are measured. |
+| **Nominal-only fallback** | No timestamps readable. Durations refused. |
 
-Declared for a view but not yet computed (reported as such, never as a value):
-lead-arm angle, hip line, hip depth, posture change, shoulder line.
+A file with inconsistent metadata is **not** thereby variable frame rate. The
+app reports the two separately, because they have different remedies: bad
+metadata needs nothing from you, while genuine VFR affects how evenly frames
+are spaced in time.
 
-**Every result carries a status.** `available`, `low_confidence`,
-`missing_landmarks`, `unsupported_camera_view`, `insufficient_frames`,
-`blocked_by_timing`, `detection_failed`. Only the first two carry a number —
-enforced in code, not just intended. A missing measurement displays as "—",
-never as `0.0`.
+### Timing trust states
 
-**Not offered at all yet:** tempo ratios and phase durations in seconds. Both
-require real source timing and are blocked by GSL-1 below. The phase container
-deliberately exposes no duration field, so nothing downstream can accidentally
-compute one.
+Every timing-dependent number states which of these it rests on:
+
+- **measured** — every frame timestamp read from the media. Durations and tempo
+  available.
+- **partially interpolated** — some frames had no readable timestamp and were
+  estimated linearly between their nearest measured neighbours. Durations
+  available, reported as low confidence.
+- **nominal only** — no timestamps readable; timing derived from a nominal rate.
+  **Durations and tempo are refused**, because a duration computed from an
+  assumed rate looks precise and is wrong.
+- **unavailable** — the file could not be probed at all.
+
+### What this means for frame identity
+
+The preview is generated with `-fps_mode passthrough`, which carries source
+timestamps through unchanged. Verified on a genuinely variable-frame-rate
+fixture: 60 frames in, 60 out, **0.00000 s** maximum drift. Preview frame N is
+source frame N for this pipeline.
+
+If the preview pipeline ever changes to re-encode with frame-rate conversion,
+that identity must be re-established by measurement rather than assumed — see
+GSL-1 in [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
 
 ## Video handling caveats
 
-- **Constant-frame-rate assumption.** Timestamps are computed as
-  `frame_index / fps` on the preview's timeline. See the section above for what
-  this costs on variable-frame-rate sources; import detects the case both by
-  comparing preview and original frame counts and by comparing the container's
-  nominal and average frame rates.
-- **Estimated frame counts.** When the container does not store `nb_frames`,
-  the count is derived from `duration × fps` and shown as "(estimated)".
+- **Timestamps are measured, not derived.** Each frame's presentation time is
+  read from the media at import. `frame_index / fps` is used only as a labelled
+  fallback when no timestamps can be read, and durations are refused in that
+  case.
+- **Container frame counts are ignored.** `nb_frames` is recorded for comparison
+  only; the decoded frame count is what the app uses.
 - **Rotation is snapped to 90° steps.** Arbitrary rotation angles are not
   supported (they effectively do not occur in phone footage).
 - **Codec support is FFmpeg's.** If your FFmpeg build cannot decode a clip, the

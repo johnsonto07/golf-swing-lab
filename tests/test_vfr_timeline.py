@@ -1,11 +1,17 @@
-"""Variable-frame-rate detection and the preview/original timeline split.
+"""Container-metadata inconsistency — which is *not* variable frame rate.
 
-Written against a real failure: a 4K HEVC phone clip whose 484 source frames
-at 22.87 fps average became a 438-frame preview at a constant 25 fps. The app
-had no way to express that those are two different timelines, so it reported
-the original's frame count next to a slider bounded by the preview's.
+These cover the metadata-comparison helpers only. The clip they were written
+against advertises 484 frames at 22.873 fps and actually decodes 438 at a
+constant 25.000, so its headers really are self-contradictory — but the video
+is not variable frame rate, and the preview did not lose frames.
 
-See docs/KNOWN_ISSUES.md (GSL-1).
+Frame spacing is classified from measured presentation timestamps in
+``video.timeline``; see ``test_timeline.py`` and ``test_timeline_repository.py``.
+What is asserted here is narrower and still true: the container's own numbers
+disagree with each other and with the decoded stream, which is worth telling
+the user about for its own sake.
+
+See docs/KNOWN_ISSUES.md (GSL-1) for the corrected diagnosis.
 """
 
 from __future__ import annotations
@@ -47,7 +53,7 @@ def _record(video: VideoMetadata, preview: VideoMetadata | None) -> SwingRecord:
     )
 
 
-class TestVariableFrameRateDetection:
+class TestContainerRateDisagreement:
     def test_detects_the_real_failing_clip(self):
         # The actual numbers from the clip that exposed this.
         assert _metadata().container_rates_disagree
@@ -72,14 +78,14 @@ class TestVariableFrameRateDetection:
         assert not meta.container_rates_disagree
 
 
-class TestTimelineIsApproximate:
-    def test_vfr_source_makes_the_timeline_approximate(self):
+class TestContainerMetadataInconsistency:
+    def test_disagreeing_rates_flag_inconsistent_metadata(self):
         record = _record(_metadata(), _metadata(fps=25.0, frame_count=438))
         assert record.container_metadata_is_inconsistent
 
     def test_frame_count_mismatch_alone_is_enough(self):
-        # Even if the rates look constant, losing frames in the proxy means
-        # preview index no longer equals source index.
+        # A count mismatch between container and preview is itself a metadata
+        # inconsistency, whatever the rates say.
         cfr = _metadata(avg_frame_rate=30.0, r_frame_rate=30.0, fps=30.0)
         preview = _metadata(avg_frame_rate=30.0, r_frame_rate=30.0, fps=30.0, frame_count=400)
         assert _record(cfr, preview).container_metadata_is_inconsistent
