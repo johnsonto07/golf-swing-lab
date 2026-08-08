@@ -169,19 +169,36 @@ A detector also declares `supported_phases` and simply omits the rest. "Not
 attempted by this detector" and "attempted and failed" are different facts, and
 conflating them hides the second one.
 
-### Preview timeline versus source timeline
+### Measured timing is the source of truth
 
-Phases are located as **preview frame indices**. On variable-frame-rate footage
-the preview was resampled, so a preview frame does not correspond to a known
-time in the original file. Anything expressed in seconds is therefore reported
-as *preview* time and labelled as such.
+`video/timeline.py` extracts every frame's presentation timestamp once at
+import and stores it as `timeline.json`. That artifact — not the container — is
+the authority on frame count, frame rate and frame spacing.
 
-Durations between phases are withheld entirely. Tempo is a ratio of two
-durations measured on a resampled timeline — it would look plausible and be
-wrong. `SwingPhases` deliberately exposes no `duration_seconds` or
-`tempo_ratio`, and a test asserts their absence, because the cheapest way to
-prevent a bad number is to make it impossible to ask for. See
-[KNOWN_ISSUES.md](KNOWN_ISSUES.md) (GSL-1).
+This replaced a set of assumptions that were measurably wrong. A real phone clip
+advertised 484 frames at 22.873 fps and actually decodes 438 at a constant
+25.000, so both the count and the rate taken from its headers were false, and
+timestamps computed from them were ~9% out.
+
+Three things are now kept distinct that used to be conflated:
+
+| | Decided from | Reported as |
+|---|---|---|
+| Frame count | decoded frames | the frame count, full stop |
+| Frame spacing | measured timestamp gaps | constant / variable / unverified |
+| Metadata quality | container vs decoded | "inconsistent metadata", never "VFR" |
+
+`TimelineConfidence` records the trust state — measured, partially interpolated,
+nominal only, unavailable — and `supports_durations` gates every duration and
+tempo calculation on it. Nominal-only media is refused rather than estimated,
+because a duration from an assumed rate looks precise and is wrong.
+
+Phases remain **preview frame indices**; `swing/source_timing.py` converts them
+to seconds through the timeline. Both are shown in the UI so neither is mistaken
+for the other. Preview frame N is source frame N for the current
+`-fps_mode passthrough` pipeline, verified at 0.00000 s drift on genuinely
+variable-rate input — an identity that must be re-established by measurement if
+that pipeline ever changes. See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) (GSL-1).
 
 ### The `pose/` package and the optional-dependency rule
 

@@ -35,8 +35,10 @@ from golf_lab.storage.file_repository import (
     sanitize_filename,
     swing_dir,
 )
+from golf_lab.storage import timeline_repository
 from golf_lab.video.metadata import VideoMetadataError, extract_metadata
 from golf_lab.video.preview import PreviewGenerationError, generate_preview, generate_thumbnail
+from golf_lab.video.timeline import CFR_TOLERANCE, RateClassification
 
 logger = get_logger(__name__)
 
@@ -146,26 +148,55 @@ def import_swing(
         status_detail = ""
         preview_meta = extract_metadata(preview_path)
 
-        counts_disagree = (
-            not video_metadata.frame_count_is_estimated
-            and preview_meta.frame_count
-            and abs(preview_meta.frame_count - video_metadata.frame_count) > 1
+        # --- measure the real timing ------------------------------------
+        # Done here, once, because it costs an ffprobe pass over every frame.
+        # This is the authority on frame count and spacing; the container's
+        # own numbers are recorded only so a disagreement can be reported.
+        report(0.9, "Measuring frame timestamps")
+        timeline = timeline_repository.measure_and_save(
+            swing_id=swing_id,
+            preview_path=preview_path,
+            nominal_fps=preview_meta.fps,
+            container_frame_count=video_metadata.frame_count,
+            original_path=original_dest,
+            root=root,
         )
-        if counts_disagree or video_metadata.is_variable_frame_rate:
+
+        # Status is decided from measured spacing, never from metadata
+        # disagreement. A container that miscounts its own frames is a
+        # metadata problem, and calling that "variable frame rate" was the
+        # false alarm this milestone exists to remove.
+        if timeline is None:
             status = SwingStatus.NEEDS_REVIEW
             status_detail = (
-                f"This clip is variable-frame-rate. The original has "
-                f"{video_metadata.frame_count} frames at ~{video_metadata.fps:.2f} fps "
-                f"average; the preview you step through has "
-                f"{preview_meta.frame_count} frames at {preview_meta.fps:.2f} fps. "
-                "Everything on screen refers to the preview timeline. Because the "
-                "source frames are not evenly spaced, preview frame numbers and "
-                "timestamps do not map exactly back to the original file. Body "
-                "analysis and the pose overlay are unaffected; tempo, phase "
-                "durations, and frame-perfect comparison against the source are "
-                "not reliable for this clip. See docs/KNOWN_ISSUES.md (GSL-1)."
+                "Frame timestamps could not be measured for this clip, so its "
+                "timing is only nominal. The pose overlay and frame stepping "
+                "work normally, but durations and tempo will be refused rather "
+                "than estimated."
             )
             logger.warning("%s: %s", swing_id, status_detail)
+        elif timeline.rate_classification is RateClassification.VARIABLE:
+            status = SwingStatus.NEEDS_REVIEW
+            status_detail = (
+                f"This clip is genuinely variable-frame-rate: its measured "
+                f"frame spacing varies beyond the {CFR_TOLERANCE:.0%} tolerance. "
+                f"{timeline.frame_count} frames decode over "
+                f"{timeline.duration_seconds:.2f}s. Timings shown come from the "
+                "measured timestamps, so durations remain trustworthy — but "
+                "frame numbers are not evenly spaced in time."
+            )
+            logger.warning("%s: %s", swing_id, status_detail)
+        elif timeline.container_metadata_is_inconsistent:
+            # Reported, but explicitly NOT as variable frame rate.
+            status_detail = (
+                f"This file's container metadata is inconsistent: it claims "
+                f"{video_metadata.frame_count} frames, but "
+                f"{timeline.frame_count} actually decode at a measured "
+                f"{timeline.measured_fps:.3f} fps. The decoded stream is "
+                "constant-rate and fully usable; the measured values are used "
+                "throughout."
+            )
+            logger.info("%s: %s", swing_id, status_detail)
 
         record = SwingRecord(
             swing_id=swing_id,

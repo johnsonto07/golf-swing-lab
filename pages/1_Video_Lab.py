@@ -37,9 +37,12 @@ from golf_lab.storage.file_repository import exports_dir  # noqa: E402
 from golf_lab.storage.swing_repository import SwingImportError  # noqa: E402
 from golf_lab.ui import (  # noqa: E402
     FRAME_INDEX_KEY,
+    effective_status_detail,
+    load_timeline,
     page_setup,
     status_badge,
     swing_selector,
+    timing_notices,
 )
 from golf_lab.video.frame_reader import (  # noqa: E402
     FrameReader,
@@ -61,13 +64,18 @@ CLUB_OPTIONS = [
 
 
 @st.cache_resource(show_spinner=False)
-def _open_reader(video_path: str, size: int, mtime: int) -> FrameReader:
-    """Cached FrameReader.
+def _open_reader(
+    video_path: str, size: int, mtime: int, swing_id: str = ""
+) -> FrameReader:
+    """Cached FrameReader, carrying the measured timeline when one exists.
 
     ``size`` and ``mtime`` are part of the cache key so that replacing the
     file on disk invalidates the cached reader.
     """
-    return FrameReader(Path(video_path))
+    from golf_lab.storage import timeline_repository
+
+    timeline = timeline_repository.load_timeline(swing_id) if swing_id else None
+    return FrameReader(Path(video_path), timeline=timeline)
 
 
 def _step_frame(delta: int, last_index: int) -> None:
@@ -201,27 +209,20 @@ with inspect_tab:
             f"{status_badge(record)} · swing id `{record.swing_id}` · "
             f"imported {record.imported_at.strftime('%Y-%m-%d %H:%M')}"
         )
-        if record.status_detail:
-            st.warning(record.status_detail)
+        measured_timeline = load_timeline(record.swing_id, record.preview_relpath or "")
 
-        if record.timeline_is_approximate:
-            st.warning(
-                "**Variable frame rate — the preview timeline is approximate.**\n\n"
-                "The frames in your original are not evenly spaced in time, so "
-                "generating a browser-playable preview resampled them to a "
-                "constant rate. Preview frame numbers and timestamps therefore "
-                "do **not** map exactly back to the original file.\n\n"
-                "- Fine: the pose overlay, joint positions, and what the swing "
-                "looks like at a given preview frame.\n"
-                "- Not yet reliable: tempo ratios, phase durations, and lining a "
-                "preview frame up with an exact frame of the source.\n\n"
-                "Tracked as GSL-1 in docs/KNOWN_ISSUES.md."
-            )
+        stored_detail = effective_status_detail(record, measured_timeline)
+        if stored_detail:
+            st.warning(stored_detail)
+        for level, message in timing_notices(record, measured_timeline):
+            (st.warning if level == "warning" else st.info)(message)
 
         try:
             video_path = swing_repository.preview_or_original_path(record)
             stat = video_path.stat()
-            reader = _open_reader(str(video_path), stat.st_size, int(stat.st_mtime))
+            reader = _open_reader(
+                str(video_path), stat.st_size, int(stat.st_mtime), record.swing_id
+            )
         except (SwingImportError, FrameReadError) as exc:
             st.error(f"Could not open this swing's video.\n\n{exc}")
             st.stop()
@@ -272,7 +273,7 @@ with inspect_tab:
                 st.stop()
 
             timestamp = reader.timestamp_for_frame(frame_index)
-            approximate = record.timeline_is_approximate
+            approximate = record.container_metadata_is_inconsistent
             st.image(
                 frame_rgb,
                 caption=(
@@ -363,7 +364,11 @@ with inspect_tab:
                         + (" (estimated)" if meta.frame_count_is_estimated else "")
                     ),
                     "Duration": f"{meta.duration_seconds:.3f} s",
-                    "Variable frame rate": "yes" if meta.is_variable_frame_rate else "no",
+                    "Container rates disagree": (
+                        "yes (metadata only — see measured panel)"
+                        if meta.container_rates_disagree
+                        else "no"
+                    ),
                     "Video codec": meta.codec_name or "unknown",
                     "Audio": meta.audio_codec_name or "none",
                     "Probed with": meta.probe_source,
@@ -392,9 +397,49 @@ with inspect_tab:
                 "refers to the preview."
             )
 
-            if meta.fps < 60:
+            st.markdown("#### Measured timing")
+            if measured_timeline is None:
+                st.caption(
+                    "Not measured for this swing. Timestamps fall back to the "
+                    "nominal rate, and durations are refused."
+                )
+            else:
+                st.write(
+                    {
+                        "Decoded frames": measured_timeline.frame_count,
+                        "Measured frame rate": (
+                            f"{measured_timeline.measured_fps:.3f} fps"
+                            if measured_timeline.measured_fps
+                            else "—"
+                        ),
+                        "Measured duration": (
+                            f"{measured_timeline.duration_seconds:.3f} s"
+                            if measured_timeline.duration_seconds is not None
+                            else "—"
+                        ),
+                        "Frame spacing": measured_timeline.rate_classification.label,
+                        "Timing basis": measured_timeline.confidence.label,
+                        "Container claimed": (
+                            measured_timeline.container_frame_count
+                            if measured_timeline.container_frame_count is not None
+                            else "—"
+                        ),
+                    }
+                )
+                st.caption(
+                    "Measured from the video's own presentation timestamps. "
+                    "These are the numbers the app uses; the container's claims "
+                    "above are shown only for comparison."
+                )
+
+            advisory_fps = (
+                measured_timeline.measured_fps
+                if measured_timeline is not None and measured_timeline.measured_fps
+                else meta.fps
+            )
+            if advisory_fps < 60:
                 st.info(
-                    f"This clip is {meta.fps:.0f} fps. Body analysis will still work, "
-                    "but impact and ball tracking are limited at this frame rate. "
-                    "See docs/RECORDING_GUIDE.md."
+                    f"This clip is {advisory_fps:.0f} fps. Body analysis will still "
+                    "work, but impact and ball tracking are limited at this frame "
+                    "rate. See docs/RECORDING_GUIDE.md."
                 )

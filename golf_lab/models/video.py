@@ -94,19 +94,22 @@ class VideoMetadata(BaseModel):
         return self.height > self.width
 
     @property
-    def is_variable_frame_rate(self) -> bool:
-        """Whether the source appears to be variable-frame-rate.
+    def container_rates_disagree(self) -> bool:
+        """Whether the container's two advertised frame rates contradict.
 
-        ffprobe's ``r_frame_rate`` is the *nominal* rate the container
-        advertises; ``avg_frame_rate`` is frames divided by duration. On
-        constant-frame-rate footage they agree. A real phone slow-motion clip
-        can report 25 nominal against 22.87 actual, which means the timeline
-        is not uniform and frame index cannot be converted to source time by
-        dividing by a single rate.
+        **This is not a variable-frame-rate test, and must not be used as one.**
+        It was, and it was wrong: a real phone clip advertising 25 nominal
+        against 22.873 average turned out to decode 438 frames at a rock-steady
+        25.000 fps. The 22.873 figure was computed from a frame count the
+        container also got wrong, so the disagreement said nothing about frame
+        spacing.
+
+        Frame spacing is now judged from measured presentation timestamps —
+        see ``video.timeline.RateClassification``. What this property is still
+        good for is telling the user their file's metadata is untrustworthy.
 
         The 2% tolerance is deliberate: NTSC-style rates (60 vs 59.94) differ
-        by 0.1% and are perfectly constant, so a tighter threshold would flag
-        most normal footage.
+        by 0.1% and are perfectly consistent.
         """
         if not self.avg_frame_rate or not self.r_frame_rate:
             return False
@@ -179,17 +182,20 @@ class SwingRecord(BaseModel):
     model_config = {"use_enum_values": False}
 
     @property
-    def timeline_is_approximate(self) -> bool:
-        """Whether preview frame numbers cannot be trusted against the source.
+    def container_metadata_is_inconsistent(self) -> bool:
+        """Whether this file's own metadata contradicts itself.
 
-        True when the source is variable-frame-rate, or when the preview ended
-        up with a different frame count from the original. Either way, "frame
-        N of the preview" no longer means "frame N of your original file", and
-        timestamps derived from a single frame rate drift.
+        **Not a claim about the decoded video.** Measuring the clip that
+        prompted this check found 438 frames at a constant 25.000 fps while its
+        container advertised 484 frames at 22.873 — inconsistent metadata, not
+        variable frame rate, and not a broken preview.
 
-        See docs/KNOWN_ISSUES.md (GSL-1).
+        Whether frame spacing is actually constant is decided from measured
+        timestamps (``video.timeline``), and whether preview frames correspond
+        to source frames is established by measurement rather than inferred
+        from these numbers.
         """
-        if self.video.is_variable_frame_rate:
+        if self.video.container_rates_disagree:
             return True
         if self.preview_video is None:
             return False

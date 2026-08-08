@@ -11,12 +11,15 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import TracebackType
-from typing import Optional, Type
+from typing import TYPE_CHECKING, Optional, Type
 
 import numpy as np
 
 from golf_lab.logging_config import get_logger
 from golf_lab.video.frame_cache import FrameCache, frame_cache_key
+
+if TYPE_CHECKING:  # pragma: no cover - import only for type checking
+    from golf_lab.video.timeline import SourceTimeline
 
 logger = get_logger(__name__)
 
@@ -64,9 +67,23 @@ class FrameReader:
     Opens the file read-only; never writes to it.
     """
 
-    def __init__(self, video_path: Path, cache_size: int = 24) -> None:
+    def __init__(
+        self,
+        video_path: Path,
+        cache_size: int = 24,
+        timeline: Optional["SourceTimeline"] = None,
+    ) -> None:
+        """``timeline``, when supplied, is the authority on timing.
+
+        Without it the reader falls back to ``index / fps``, which is correct
+        only for constant-rate media and is the assumption that produced ~9%
+        wrong timestamps on a file whose container misreported its rate. The
+        fallback is kept for callers that have no measured timeline, and it is
+        distinguishable through :attr:`timing_is_measured`.
+        """
         import cv2
 
+        self.timeline = timeline
         self.video_path = Path(video_path)
         if not self.video_path.exists():
             raise FrameReadError(f"Video not found: {self.video_path}")
@@ -107,14 +124,52 @@ class FrameReader:
 
     # -- helpers --------------------------------------------------------
     @property
+    def frame_count_is_measured(self) -> bool:
+        """Whether the frame count came from decoded frames rather than OpenCV.
+
+        OpenCV reports ``CAP_PROP_FRAME_COUNT``, which is the container's
+        claim — the same number that said 484 for a 438-frame file.
+        """
+        return self.timeline is not None and self.timeline.frame_count > 0
+
+    @property
     def last_index(self) -> int:
+        if self.frame_count_is_measured:
+            assert self.timeline is not None
+            return max(self.timeline.frame_count - 1, 0)
         return max(self.frame_count - 1, 0)
 
     def clamp(self, frame_index: int) -> int:
         return max(0, min(int(frame_index), self.last_index))
 
+    @property
+    def timing_is_measured(self) -> bool:
+        """Whether timestamps come from the media rather than a nominal rate."""
+        return (
+            self.timeline is not None
+            and self.timeline.confidence.supports_durations
+        )
+
     def timestamp_for_frame(self, frame_index: int) -> float:
+        """Presentation time of a frame, measured where possible.
+
+        Falls back to ``index / fps`` only when no measured timeline is
+        available; :attr:`timing_is_measured` distinguishes the two so the UI
+        never presents an assumed time as a measured one.
+        """
+        if self.timeline is not None:
+            measured = self.timeline.source_seconds(frame_index)
+            if measured is not None:
+                return measured
         return timestamp_for_frame(frame_index, self.fps)
+
+    def frame_for_timestamp(self, seconds: float) -> int:
+        """Nearest frame to a timestamp, using measured timing where available."""
+        if self.timeline is not None:
+            index = self.timeline.preview_index_for_source_seconds(seconds)
+            if index is not None:
+                return index
+        return frame_for_timestamp(seconds, self.fps, self.frame_count)
 
     # -- reading --------------------------------------------------------
     def read_frame(self, frame_index: int) -> np.ndarray:

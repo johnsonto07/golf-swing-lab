@@ -82,9 +82,9 @@ Every phase and metric carries an explicit status — `available`,
 `insufficient_frames`, `blocked_by_timing`, `detection_failed` — and only the
 first two may carry a number. A missing measurement shows as "—", never `0.0`.
 
-**Tempo and phase durations are deliberately not offered**, because they need
-real source timing that variable-frame-rate clips do not currently provide.
-See the limitation below.
+**Tempo and phase durations are computed from measured presentation
+timestamps**, and refused outright on media whose timing cannot be measured.
+Each states its timing basis.
 
 <p align="center">
   <img src="docs/images/swing-analysis-phases.png" alt="Phases tab: detected phases and camera-view-gated metrics" width="90%">
@@ -393,26 +393,32 @@ claim about accuracy on real swings, which only your own footage can establish.
 
 ---
 
-## Known limitation: variable-frame-rate clips
+## How timing works
 
-Everything interactive reads the generated preview, not your original. For
-constant-frame-rate footage the two are frame-for-frame equivalent. For
-**variable-frame-rate** footage (many phone auto modes, slow-motion, screen
-recordings) FFmpeg must resample to a constant rate to produce a
-browser-playable proxy, so preview frame numbers and timestamps do **not** map
-exactly back to your original file.
+Every frame's presentation timestamp is measured at import with ffprobe and
+stored in `timeline.json`. **Container metadata is not trusted for timing**, and
+that is not caution for its own sake — it was a bug. A real phone clip
+advertised 484 frames at 22.873 fps; it actually decodes **438 frames at a
+constant 25.000 fps**. Timestamps derived from the header were ~9% wrong, and
+the clip was incorrectly flagged variable-frame-rate.
 
-The app detects this, marks the swing "Needs review", and warns you on both the
-Video Lab and Swing Analysis pages.
+The app now separates things that were previously conflated:
 
-- **Unaffected:** the pose overlay, joint positions, confidence, saved frames.
-- **Not yet reliable:** tempo ratios, phase durations, and frame-perfect
-  comparison against the source.
+- **Decoded frame count** is the source of truth. `nb_frames` is shown only for
+  comparison.
+- **Frame spacing** — constant, variable, or unverified — is judged from
+  measured timestamp gaps, never from metadata disagreement.
+- **Inconsistent container metadata** is reported as exactly that. It does not
+  mean your video is variable frame rate.
 
-None of those features exist yet, so no wrong number is being shown — the
-restriction exists so they are not built on a foundation that would make them
-wrong. Tracked as **GSL-1** in [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) and
-must be resolved before Milestone 3 tempo work or Milestone 5 export.
+**Constant and variable frame rate are both fully supported**, because timings
+are measured either way. What is *not* supported is media whose timestamps
+cannot be read at all: there, timing falls back to a nominal rate and durations
+and tempo are **refused** rather than estimated, since a duration from an
+assumed rate looks precise and is wrong.
+
+Every timing-dependent number states its basis: *measured*, *partially
+interpolated*, *nominal only*, or *unavailable*.
 
 ## Roadmap
 
@@ -430,10 +436,9 @@ must be resolved before Milestone 3 tempo work or Milestone 5 export.
 | 8 | History and progress | ⬜ planned |
 | 9 | Custom detection research | ⬜ planned |
 
-Tempo and phase durations in Milestone 3, and timing-sensitive ball-tracer
-export in Milestone 5, are **blocked on
-[issue #1](https://github.com/johnsonto07/golf-swing-lab/issues/1)** — see the
-VFR limitation above. Full detail in [docs/ROADMAP.md](docs/ROADMAP.md).
+Tempo and phase durations are computed from measured timestamps as of the
+timeline work; see [How timing works](#how-timing-works). Full detail in
+[docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Privacy
 

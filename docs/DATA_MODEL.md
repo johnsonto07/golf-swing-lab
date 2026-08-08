@@ -12,6 +12,7 @@ data/
       preview.mp4               upright H.264, browser-safe, silent
       thumbnail.jpg
       metadata.json             SwingRecord (implemented)
+      timeline.json             measured per-frame timestamps
       pose_raw.npz              Milestone 2
       pose_smoothed.npz         Milestone 2
       phases.json               Milestone 3
@@ -37,36 +38,37 @@ whole `data/` folder can be moved or copied to another machine intact.
 | `coded_width`, `coded_height` | dimensions **as stored** |
 | `width`, `height` | **display** dimensions, after rotation |
 | `rotation_degrees` | clockwise, snapped to 0/90/180/270 |
-| `fps` | from `avg_frame_rate`, else `r_frame_rate` |
+| `fps` | container's nominal rate; a fallback only — see `timeline.json` |
 | `avg_frame_rate` | frames ÷ duration, i.e. the rate actually observed |
 | `r_frame_rate` | the nominal rate the container advertises |
-| `frame_count` | `nb_frames` when available |
+| `frame_count` | the container's `nb_frames`; **not** the decoded count |
 | `frame_count_is_estimated` | true when derived from `duration × fps` |
 | `duration_seconds` | stream duration, else container duration |
 | `probe_source` | `"ffprobe"` or `"opencv"` |
 
-Both rates are stored because **their disagreement is the variable-frame-rate
-signal**. `is_variable_frame_rate` is true when they differ by more than 2% —
-a tolerance chosen so NTSC-style rates (60 vs 59.94, a 0.1% difference on
-perfectly constant footage) are not flagged.
+**None of these fields is trusted for timing.** They are the container's
+claims, and a real clip advertised 484 frames at 22.873 fps while decoding 438
+at a constant 25.000. Frame count, frame rate and frame spacing all come from
+`timeline.json`, measured from presentation timestamps.
 
-Methods: `timestamp_for_frame`, `frame_for_timestamp`, `is_portrait`. Both
-conversions assume constant frame rate (see `LIMITATIONS.md`).
+`container_rates_disagree` is true when the two advertised rates differ by more
+than 2% — a tolerance chosen so NTSC-style rates (60 vs 59.94) are not flagged.
+It reports **inconsistent metadata**, not variable frame rate, and must not be
+used as a rate classifier.
 
 ### `SwingRecord.preview_video` — the second timeline
 
 A full `VideoMetadata` for the generated proxy, stored alongside the
-original's. It is not redundant: FFmpeg normalizes a variable-frame-rate
-source to constant frame rate, so the preview can have a different frame count
-*and* a different frame rate. A real clip produced 484 source frames at 22.87
-fps average against a 438-frame preview at 25 fps.
+original's — useful because the two containers can report different things.
 
-**Every interactive frame number in the app refers to `preview_video`**, never
-to `video`. `preview_frame_count` and `preview_fps` are the accessors; both
-fall back to the original for records written before the field existed.
+**Every interactive frame number in the app refers to the preview**, and its
+authoritative frame count and timing come from `timeline.json` rather than
+from either container. `preview_frame_count` and `preview_fps` remain as
+fallbacks for records written before timing was measured.
 
-`timeline_is_approximate` is true when the source is VFR or the counts
-disagree, and is what drives the on-screen warnings. See
+`container_metadata_is_inconsistent` is true when a file's own numbers
+contradict each other or the decoded stream. It drives an informational notice
+only; it is **not** a statement that the video is variable frame rate. See
 [KNOWN_ISSUES.md](KNOWN_ISSUES.md) (GSL-1).
 
 ### `SwingContext` — what the user reports, never guessed
@@ -233,3 +235,27 @@ A list of observations in the shape agreed for coaching:
 weights, no exports are ever committed. Test fixtures are **generated** by
 FFmpeg at test time rather than checked in, so no private golf video enters the
 repository.
+
+
+## `timeline.json` (measured source timing)
+
+Written at import by `video/timeline.py`. The authority on frame count, frame
+rate and frame spacing — the container's own numbers are recorded only for
+comparison.
+
+| Field | Notes |
+|---|---|
+| `schema_version`, `extractor`, `extractor_version` | provenance; a change invalidates stored timelines |
+| `confidence` | `measured` / `degraded` / `nominal` / `unavailable` |
+| `rate_classification` | `constant` / `variable` / `unverified`, from measured gaps |
+| `measured_fps`, `measured_duration_seconds`, `frame_count` | decoded truth |
+| `nominal_fps`, `container_frame_count` | the container's claims, for comparison only |
+| `source_seconds[]`, `durations[]`, `methods[]` | per frame, stored column-wise |
+| `source_fingerprint`, `preview_fingerprint` | staleness detection |
+
+`methods[i]` is `measured`, `interpolated`, or `nominal`. Durations are refused
+whenever either endpoint is `nominal`, because a duration derived from an
+assumed frame rate looks precise and is wrong.
+
+Frames serialize column-wise: a 4-minute 120 fps clip is ~29k frames, and a list
+of objects would cost megabytes of punctuation.

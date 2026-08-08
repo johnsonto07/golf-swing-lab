@@ -4,7 +4,7 @@ Drives the real page script with a swing, stored pose data, and a stored phase
 analysis in place. The behaviours pinned here are the ones that would quietly
 mislead someone if they regressed: an unsupported metric must say it is
 unsupported rather than vanish, phases must be labelled as preview frames, and
-the tempo block must stay absent while GSL-1 is open.
+and tempo appears only when the measured timeline can support it.
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ from golf_lab.storage import (  # noqa: E402
     analysis_repository,
     pose_repository,
     swing_repository,
+    timeline_repository,
 )
 from golf_lab.swing.geometry_detector import default_detector  # noqa: E402
 from golf_lab.swing.metric_registry import evaluate_all  # noqa: E402
@@ -212,19 +213,51 @@ class TestRangePhaseRendering:
 
 
 class TestTimingHonesty:
-    def test_tempo_is_not_offered(self, swing_with_phases):
-        # GSL-1 is open. Nothing on this page may present tempo.
+    def test_tempo_is_refused_without_a_measured_timeline(self, swing_with_phases):
+        """Tempo is now offered — but only where timing was measured.
+
+        This fixture stores no timeline, so the page must show the tempo row
+        as blocked with a reason rather than computing a ratio from a nominal
+        frame rate. Replaces the older assertion that tempo was never offered
+        at all, which described the state before timing could be measured.
+        """
+        record, _, _ = swing_with_phases
+        # Import measures timing, so remove it to reach the refusal path.
+        timeline_repository.delete_timeline(record.swing_id)
+
+        app = AppTest.from_file(SWING_ANALYSIS, default_timeout=120).run()
+        lowered = _all_text(app).lower()
+
+        assert "tempo" in lowered, "the tempo row should be present, not absent"
+
+        # The substantive guarantee: with no measured timing, no ratio number
+        # appears anywhere. Matched precisely rather than by searching for
+        # ":1", which also matches clock times such as the swing's own
+        # "imported 2026-08-06 12:16" caption — that made an earlier version of
+        # this test fail only during minutes beginning with 1.
+        assert re.search(r"\d\.\d+\s*:\s*1(?!\d)", lowered) is None
+
+    def test_tempo_is_offered_when_timing_is_measured(self, swing_with_phases):
+        """Import measures timing, so the fixture supports a real ratio.
+
+        The counterpart to the refusal test: tempo is no longer blocked
+        wholesale — it is blocked exactly when the timing cannot support it.
+        """
+        app = AppTest.from_file(SWING_ANALYSIS, default_timeout=120).run()
+        lowered = _all_text(app).lower()
+
+        assert "tempo" in lowered
+        assert "measured" in lowered, "the timing basis must be stated"
+        assert re.search(r"\d\.\d+\s*:\s*1(?!\d)", lowered) is not None, (
+            "a measured timeline should produce an actual tempo ratio"
+        )
+
+    def test_source_timing_states_its_basis(self, swing_with_phases):
         app = AppTest.from_file(SWING_ANALYSIS, default_timeout=120).run()
         text = _all_text(app).lower()
-
-        assert "not offered yet" in text
-        assert "gsl-1" in text
-
-        # No ratio like "2.8:1" is displayed. Matched precisely rather than by
-        # searching for ":1", which also matches clock times such as the
-        # swing's own "imported 2026-08-06 12:16" caption — that made this test
-        # fail only during minutes beginning with 1.
-        assert re.search(r"\d\.\d+\s*:\s*1(?!\d)", text) is None
+        assert "source-time timing" in text
+        # Durations must never be presented without saying what they rest on.
+        assert "measured" in text
 
     def test_timestamps_are_labelled_preview(self, swing_with_phases):
         app = AppTest.from_file(SWING_ANALYSIS, default_timeout=120).run()
