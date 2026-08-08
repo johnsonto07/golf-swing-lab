@@ -15,9 +15,9 @@ data/
       timeline.json             measured per-frame timestamps
       pose_raw.npz              Milestone 2
       pose_smoothed.npz         Milestone 2
-      phases.json               Milestone 3
-      analysis.json             Milestone 3
-      tracer.json               Milestone 5
+      pose_info.json            Milestone 2
+      swing_analysis.json       Milestone 3
+      tracer.json               Milestone 5 (model implemented)
       exports/                  every generated file lands here
 ```
 
@@ -259,3 +259,43 @@ assumed frame rate looks precise and is wrong.
 
 Frames serialize column-wise: a 4-minute 120 fps clip is ~29k frames, and a list
 of objects would cost megabytes of punctuation.
+
+
+## `tracer.json` (Milestone 5 — model implemented, UI and export pending)
+
+Written by `tracer/model.py` through `storage/tracer_repository.py`. The only
+**authored** artifact in the project: everything else can be recomputed from
+the video, and this cannot. Re-running pose inference or phase detection never
+touches it.
+
+| Field | Notes |
+|---|---|
+| `schema_version` | a change flags a stored drawing rather than redrawing it |
+| `impact_frame`, `impact_source` | preview frame index, and `user` / `detector` — set together or not at all |
+| `points[]` | `frame`, `x`, `y`, `source`, optional `confidence` |
+| `shape`, `height`, `handedness` | the presets that seeded the curve |
+| `controls` | `launch_direction_degrees`, `apex_height`, `curvature`, `endpoint` |
+| `preview_fingerprint` | staleness detection |
+
+Coordinates are normalized 0–1 against the **preview** frame, matching
+`pose_raw.npz`. Storing pixels would break silently if the preview were
+regenerated at a different width.
+
+`source` is `confirmed` (a person placed it), `tracked` (Milestone 6 found it),
+or `estimated` (the curve filled a gap). These are stored separately and drawn
+distinctly, so a reload can never make an invented point look observed.
+Correcting a tracked point makes it `confirmed` and drops the tracker's
+confidence, which described the algorithm's guess and not the person's.
+
+Two rules live in the model rather than the renderer: nothing may be placed
+before the impact frame is confirmed, and moving impact later **drops** points
+stranded behind it rather than hiding them. A tracer drawn before the ball is
+struck is a false claim about the video, not a style choice.
+
+No rendered curve is stored. The spline is a pure function of `points` and
+`controls`, so persisting its output would create a second source of truth that
+could disagree after an edit.
+
+Staleness is reported, never acted on. A regenerated preview means the stored
+coordinates may not line up any more — but the drawing is hand-made, so it is
+kept and flagged instead of discarded.

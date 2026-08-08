@@ -160,18 +160,34 @@ is mistaken for the other.
 - Differences stated as observations, never automatically as faults
 - Compare against a pro, your personal best, or your average
 
-## ⬜ Milestone 5 — Manual ball tracer
+## 🔜 Milestone 5 — Manual ball tracer
 
 > The timing foundation this needs is in place: preview frame N is source
 > frame N for the current pipeline, verified by measurement, and every frame
 > carries a measured timestamp. Export still has to respect rotation, aspect
 > ratio and audio, which is Milestone 5 work.
 
-- Impact confirmation, click-to-place ball, additional visible points
-- Shot-shape and height presets seeding an editable spline
-- Launch direction, apex, curvature, endpoint controls
-- Growing tracer preview; never visible before the confirmed impact frame
-- Final render at original quality with original audio remuxed
+- ✅ Impact confirmation and ball points, with provenance kept distinct
+- ✅ Shot-shape and height presets seeding an editable curve
+- ⬜ Spline geometry: launch direction, apex, curvature, endpoint
+- ⬜ Overlay rendering, growing, never before the confirmed impact frame
+- ⬜ Click-to-place UI on the Ball Tracer page
+- ⬜ Final render at original quality with original audio remuxed
+
+Delivered in slices so the parts that can be tested headlessly land before the
+part that needs a browser:
+
+| Slice | Content | Status |
+|---|---|---|
+| 5a | `tracer/model.py`, `storage/tracer_repository.py` | done |
+| 5b | spline geometry from points + controls | next |
+| 5c | overlay rendering and the growing tracer | |
+| 5d | interactive page: impact confirm, click-to-place | |
+| 5e | export at original quality, audio remuxed | |
+
+5a–5c carry no new dependency and are fully unit-testable. The only new
+dependency in the milestone is the click-capture component in 5d — see
+ARCHITECTURE.md, "Capturing a click on an image".
 
 ## ⬜ Milestone 6 — Assisted tracking
 
