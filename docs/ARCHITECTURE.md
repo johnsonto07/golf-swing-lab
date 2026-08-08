@@ -42,10 +42,12 @@ Streamlit, which is why the test suite never imports Streamlit.
 
 ### Directories that exist now
 
-`models/`, `video/`, `storage/`, and `pose/` are implemented. `swing/`,
-`tracer/`, and `coaching/` are described here and in `ROADMAP.md` rather than
-created as empty stub files — an empty module that imports cleanly but does
-nothing is worse than no module, because it hides which milestone you are on.
+`models/`, `video/`, `storage/`, `pose/`, and `swing/` are implemented.
+`tracer/` holds its data model and storage (Milestone 5, slice 5a); its
+geometry, rendering, and export are still to come. `coaching/` is described
+here and in `ROADMAP.md` rather than created as an empty stub file — an empty
+module that imports cleanly but does nothing is worse than no module, because
+it hides which milestone you are on.
 
 ### The four stages, and why they are separate
 
@@ -81,6 +83,34 @@ golf_lab/swing/
 golf_lab/storage/
   analysis_repository.py  swing_analysis.json + derived-result staleness
 ```
+
+### The tracer is authored, not derived
+
+```
+golf_lab/tracer/
+  model.py                BallPoint, PointSource, CurveControls, TracerSpec;
+                          the impact rule and the shot-shape presets
+golf_lab/storage/
+  tracer_repository.py    tracer.json + staleness that reports, never discards
+```
+
+Every other artifact in the project can be regenerated from the video. A
+tracer cannot — it is the only thing a user makes by hand. Two consequences
+follow, and both are deliberate departures from how derived results behave:
+
+- **Staleness is reported, not acted on.** A regenerated preview means stored
+  coordinates may no longer line up, so the tracer is flagged and kept.
+  Silently recomputing it, the correct move for `swing_analysis.json`, would
+  here mean destroying work with no way to get it back.
+- **Provenance is structural.** `confirmed`, `tracked`, and `estimated` points
+  are stored as different things, so a save-and-reload can never let an
+  invented point pass for an observed one. Correcting a tracked point makes it
+  confirmed and drops the tracker's confidence, which described the
+  algorithm's guess rather than the person's.
+
+No rendered curve is stored: the spline is a pure function of the points and
+controls, so persisting its output would create a second source of truth that
+could disagree with them after an edit.
 
 ### How phases are located, and why impact is a region
 
@@ -357,6 +387,27 @@ Settings reports it.
 The numpy 1.x pin is the single most important line in `pyproject.toml`.
 Upgrading it before MediaPipe is integrated will produce confusing binary
 errors.
+
+### Capturing a click on an image (Milestone 5)
+
+Streamlit cannot report where on an image the user clicked, and the tracer's
+core interaction is placing a ball by clicking it. Three options were weighed:
+
+| Option | Verdict |
+|---|---|
+| `streamlit-image-coordinates` | **chosen** — a small JS component with no Python dependencies of its own, so it cannot reach the numpy 1 ABI |
+| `streamlit-drawable-canvas` | richer, but heavier and has historically lagged Streamlit releases, which is real risk against the 1.41.1 pin |
+| number inputs + rendered crosshair | no dependency at all, but turns the central interaction into type-and-check |
+
+Having no Python dependencies is the deciding property, not the file size: the
+failure this project keeps hitting is a transitive resolve that moves numpy or
+opencv. A component that ships only JavaScript cannot cause it.
+
+The decision is recorded here, but the dependency is **not yet added**. It gets
+verified in a clean virtualenv against `streamlit==1.41.1`, with `pip check`,
+before it is pinned — the same bar every other dependency cleared. Slices 5a-5c
+deliberately need none of it, so the model, geometry, and rendering layers stay
+testable headlessly whatever happens to the component.
 
 ## Error handling
 

@@ -1,12 +1,16 @@
 """Swing phases: what they are, and how a detection reports itself.
 
 Phases are located as **preview-frame indices**, never as source timestamps.
-That distinction is load-bearing rather than pedantic: on variable-frame-rate
-footage the preview timeline is resampled, so a preview frame index cannot be
-converted to a time in the original file (see docs/KNOWN_ISSUES.md, GSL-1).
-Anything expressed in seconds is therefore reported as preview time and
-labelled as such, and durations between phases are withheld entirely until
-that mapping exists.
+That distinction is load-bearing rather than pedantic: a phase is found by
+looking at decoded preview frames, so a frame index is the only thing this
+module actually observes.
+
+Turning those indices into seconds is a separate step, and deliberately not
+done here. ``video.timeline`` measures each frame's presentation timestamp and
+reports how far it trusts the result; ``swing.source_timing`` uses that to
+express phase positions, durations, and tempo in source-video time, refusing
+to answer when the timing is merely nominal. Nothing in this module converts
+frames to time on its own.
 """
 
 from __future__ import annotations
