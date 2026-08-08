@@ -37,6 +37,7 @@ from golf_lab.storage.file_repository import exports_dir  # noqa: E402
 from golf_lab.storage.swing_repository import SwingImportError  # noqa: E402
 from golf_lab.ui import (  # noqa: E402
     FRAME_INDEX_KEY,
+    effective_status_detail,
     load_timeline,
     page_setup,
     status_badge,
@@ -208,10 +209,11 @@ with inspect_tab:
             f"{status_badge(record)} · swing id `{record.swing_id}` · "
             f"imported {record.imported_at.strftime('%Y-%m-%d %H:%M')}"
         )
-        if record.status_detail:
-            st.warning(record.status_detail)
-
         measured_timeline = load_timeline(record.swing_id, record.preview_relpath or "")
+
+        stored_detail = effective_status_detail(record, measured_timeline)
+        if stored_detail:
+            st.warning(stored_detail)
         for level, message in timing_notices(record, measured_timeline):
             (st.warning if level == "warning" else st.info)(message)
 
@@ -430,9 +432,14 @@ with inspect_tab:
                     "above are shown only for comparison."
                 )
 
-            if meta.fps < 60:
+            advisory_fps = (
+                measured_timeline.measured_fps
+                if measured_timeline is not None and measured_timeline.measured_fps
+                else meta.fps
+            )
+            if advisory_fps < 60:
                 st.info(
-                    f"This clip is {meta.fps:.0f} fps. Body analysis will still work, "
-                    "but impact and ball tracking are limited at this frame rate. "
-                    "See docs/RECORDING_GUIDE.md."
+                    f"This clip is {advisory_fps:.0f} fps. Body analysis will still "
+                    "work, but impact and ball tracking are limited at this frame "
+                    "rate. See docs/RECORDING_GUIDE.md."
                 )

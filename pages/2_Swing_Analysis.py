@@ -65,6 +65,7 @@ from golf_lab.swing.results import ResultStatus  # noqa: E402
 from golf_lab.swing.source_timing import all_source_timings  # noqa: E402
 from golf_lab.ui import (  # noqa: E402
     FRAME_INDEX_KEY,
+    effective_status_detail,
     load_timeline,
     page_setup,
     swing_selector,

@@ -88,6 +88,28 @@ def load_timeline(swing_id: str, fingerprint: str):
     return timeline_repository.load_timeline(swing_id)
 
 
+def effective_status_detail(record: SwingRecord, timeline) -> str:
+    """The record's status text, suppressed when measurement contradicts it.
+
+    Swings imported before timing was measured carry a stored `status_detail`
+    claiming variable frame rate, written by the old metadata-comparison
+    classifier. That text is wrong for clips whose measured spacing is
+    constant, and it is persisted data — re-running the app cannot rewrite
+    every user's `metadata.json`, so the display defers to the measurement
+    instead of the stored sentence.
+    """
+    detail = record.status_detail or ""
+    if not detail or timeline is None:
+        return detail
+
+    from golf_lab.video.timeline import RateClassification
+
+    claims_vfr = "variable-frame-rate" in detail.lower() or "variable frame rate" in detail.lower()
+    if claims_vfr and timeline.rate_classification is RateClassification.CONSTANT:
+        return ""
+    return detail
+
+
 def timing_notices(record: SwingRecord, timeline) -> list[tuple[str, str]]:
     """Warnings to show for a swing's timing, as ``(level, message)`` pairs.
 

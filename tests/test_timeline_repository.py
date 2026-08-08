@@ -304,3 +304,70 @@ class TestImportMeasuresTiming:
         )
         assert record.status is SwingStatus.READY
         assert "variable-frame-rate" not in record.status_detail.lower()
+
+
+class TestStaleStatusDetail:
+    """Records imported before timing was measured carry a wrong VFR sentence."""
+
+    def _record_with_detail(self, detail):
+        from golf_lab.config import ANALYSIS_VERSION, APP_VERSION
+        from golf_lab.models.video import SwingRecord, SwingStatus, VideoMetadata
+
+        return SwingRecord(
+            swing_id=SWING_ID,
+            original_filename="old.mov",
+            original_relpath="original.mov",
+            preview_relpath="preview.mp4",
+            video=VideoMetadata(
+                path="original.mov", coded_width=1920, coded_height=1080,
+                width=1920, height=1080, fps=22.873, frame_count=484,
+                duration_seconds=17.5,
+            ),
+            status=SwingStatus.NEEDS_REVIEW,
+            status_detail=detail,
+            app_version=APP_VERSION,
+            analysis_version=ANALYSIS_VERSION,
+        )
+
+    def _constant_timeline(self):
+        frames = [
+            FrameTiming(preview_index=i, source_seconds=i / 25.0,
+                        method=TimingMethod.MEASURED)
+            for i in range(438)
+        ]
+        return SourceTimeline(
+            frames=frames, confidence=TimelineConfidence.MEASURED,
+            measured_fps=25.0, is_constant_rate=True,
+        )
+
+    def test_stale_vfr_claim_is_suppressed_by_measurement(self):
+        from golf_lab.ui import effective_status_detail
+
+        record = self._record_with_detail(
+            "This clip is variable-frame-rate. The original has 484 frames at "
+            "~22.87 fps average; the preview you step through has 438 frames."
+        )
+        assert effective_status_detail(record, self._constant_timeline()) == ""
+
+    def test_a_genuine_vfr_claim_survives(self):
+        from golf_lab.ui import effective_status_detail
+
+        record = self._record_with_detail("This clip is genuinely variable-frame-rate.")
+        variable = self._constant_timeline()
+        variable.is_constant_rate = False
+        assert effective_status_detail(record, variable) != ""
+
+    def test_unrelated_status_text_is_untouched(self):
+        from golf_lab.ui import effective_status_detail
+
+        record = self._record_with_detail("Thumbnail generation failed.")
+        assert (
+            effective_status_detail(record, self._constant_timeline())
+            == "Thumbnail generation failed."
+        )
+
+    def test_without_a_timeline_the_stored_text_stands(self):
+        from golf_lab.ui import effective_status_detail
+
+        record = self._record_with_detail("This clip is variable-frame-rate.")
+        assert effective_status_detail(record, None) != ""
